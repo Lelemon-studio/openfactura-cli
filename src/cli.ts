@@ -49,11 +49,11 @@ function buscarComando(posicionales: string[]): { comando: Comando; resto: strin
 }
 
 function opcionInvalida(mensaje: string, code: string): string {
-  const opcion = /'(-[^' ]+)/.exec(mensaje)?.[1];
+  const opcion = /'(?:-\w, )?(--?[\w-]+)/.exec(mensaje)?.[1];
   if (!opcion) return mensaje;
   if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") return `La opción ${opcion} no existe`;
   if (/does not take an argument/.test(mensaje)) return `${opcion} no lleva valor`;
-  if (/argument missing/.test(mensaje)) return `${opcion} necesita un valor`;
+  if (/argument missing|argument is ambiguous/.test(mensaje)) return `${opcion} necesita un valor`;
   return mensaje;
 }
 
@@ -74,6 +74,10 @@ export async function run(argv: string[], env: Record<string, string | undefined
     const a = argv[i]!;
     const nombre = a.replace(/^--?/, "").split("=")[0]!;
     const conValor = nombre === "api-key" || nombre === "timeout";
+    if (nombre === "v" || nombre === "version") {
+      io.out(VERSION);
+      return 0;
+    }
     if (!(nombre in FLAGS_GLOBALES) && nombre !== "h") {
       return error(io, { error: `Opción desconocida antes del comando: ${a}. Mira openfactura --help`, code: "USAGE" }, 2);
     }

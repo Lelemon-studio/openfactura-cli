@@ -14,7 +14,7 @@ export class Limitador {
   private readonly porMinuto: number;
 
   constructor(opciones: OpcionesLimitador = {}) {
-    this.ahora = opciones.ahora ?? Date.now;
+    this.ahora = opciones.ahora ?? (() => performance.now());
     this.esperar = opciones.esperar ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.porSegundo = opciones.porSegundo ?? 3;
     this.porMinuto = opciones.porMinuto ?? 100;

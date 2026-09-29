@@ -58,7 +58,8 @@ beforeEach(() => {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
       headers: (init?.headers ?? {}) as Record<string, string>,
     });
-    const r = rutas[`${metodo} ${ruta}`]?.[0] ?? { status: 404, body: { error: { message: `sin mock ${metodo} ${ruta}`, code: "TEST" } } };
+    const cola = rutas[`${metodo} ${ruta}`];
+    const r = (cola && cola.length > 1 ? cola.shift() : cola?.[0]) ?? { status: 404, body: { error: { message: `sin mock ${metodo} ${ruta}`, code: "TEST" } } };
     return new Response(r.body == null ? null : JSON.stringify(r.body), { status: r.status });
   }) as typeof fetch;
 });
@@ -177,6 +178,48 @@ describe("notas de crédito acumuladas", () => {
     const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--item", "x|1|1000", ...HOY);
     expect(r.codigo).toBe(0);
     expect(r.out.avisos.join(" ")).toContain("sólo se revisaron");
+  });
+
+  test("si falla una página de notas previas, igual cuenta las que ya vio", async () => {
+    rutas["POST /document/issued"] = [
+      { status: 200, body: { current_page: 1, last_page: 2, total: 2, data: [{ TipoDTE: 61, Folio: 7 }] } },
+      { status: 500, body: { error: { message: "caído" } } },
+    ];
+    responde("GET /document/76795561-8/61/7/json", {
+      status: 200,
+      body: {
+        json: {
+          Encabezado: { Totales: { MntNeto: 8000, TasaIVA: 19, IVA: 1520, MntTotal: 9520 } },
+          Referencia: [{ TpoDocRef: "33", FolioRef: 30, CodRef: 3 }],
+        },
+      },
+    });
+    const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--item", "x|1|3000", ...HOY);
+    expect(r.codigo).toBe(2);
+    expect(r.err.error).toContain("61:7");
+  });
+
+  test("una nota que aparece en dos páginas se cuenta una vez", async () => {
+    const pagina = { status: 200, body: { current_page: 1, last_page: 2, total: 2, data: [{ TipoDTE: 61, Folio: 7 }] } };
+    rutas["POST /document/issued"] = [pagina, pagina];
+    responde("GET /document/76795561-8/61/7/json", {
+      status: 200,
+      body: {
+        json: { Encabezado: { Totales: { MntNeto: 4000, TasaIVA: 19, IVA: 760, MntTotal: 4760 } }, Referencia: [{ TpoDocRef: "33", FolioRef: 30, CodRef: 3 }] },
+      },
+    });
+    const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--item", "x|1|3000", ...HOY);
+    expect(r.codigo).toBe(0);
+  });
+
+  test("si una página de notas previas llega vacía antes de la última, avisa", async () => {
+    rutas["POST /document/issued"] = [
+      { status: 200, body: { current_page: 1, last_page: 3, total: 3, data: [] } },
+      { status: 204, body: null },
+    ];
+    const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--item", "x|1|1000", ...HOY);
+    expect(r.codigo).toBe(0);
+    expect(r.out.avisos.join(" ")).toContain("puede estar incompleta");
   });
 
   test("si no puede revisar las notas previas, avisa", async () => {

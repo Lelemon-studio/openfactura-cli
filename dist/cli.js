@@ -12,7 +12,7 @@ class Limitador {
   porSegundo;
   porMinuto;
   constructor(opciones = {}) {
-    this.ahora = opciones.ahora ?? Date.now;
+    this.ahora = opciones.ahora ?? (() => performance.now());
     this.esperar = opciones.esperar ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.porSegundo = opciones.porSegundo ?? 3;
     this.porMinuto = opciones.porMinuto ?? 100;
@@ -353,6 +353,7 @@ async function listar(ctx, ruta, filtros) {
   const primera = pagina;
   let ultima = 0;
   let total = 0;
+  let errorPagina;
   for (;; ) {
     const body = pagina > 1 ? { ...filtros, Page: pagina } : filtros;
     let r;
@@ -361,25 +362,36 @@ async function listar(ctx, ruta, filtros) {
     } catch (e) {
       if (pagina === primera)
         throw e;
+      if (e instanceof ApiError)
+        errorPagina = { code: e.code, status: e.status };
       avisos.push(`El listado quedó incompleto: falló la página ${pagina} de ${ultima} (${e.message}). Lo de arriba es lo que alcanzó a bajar.`);
       break;
     }
-    if (!r)
+    if (!r) {
+      if (pagina > primera && pagina <= ultima)
+        avisos.push(`El listado quedó incompleto: la página ${pagina} de ${ultima} llegó vacía. Lo de arriba es lo que alcanzó a bajar.`);
       break;
+    }
     documentos.push(...r.data ?? []);
-    const ultimaInformada = Number(r.last_page ?? pagina);
-    ultima = Number.isInteger(ultimaInformada) && ultimaInformada >= 0 ? ultimaInformada : pagina;
-    const totalInformado = Number(r.total ?? documentos.length);
-    total = Number.isFinite(totalInformado) ? totalInformado : documentos.length;
+    const ultimaInformada = Number(r.last_page);
+    if (r.last_page !== undefined && Number.isInteger(ultimaInformada) && ultimaInformada >= 0)
+      ultima = ultimaInformada;
+    else
+      ultima = Math.max(ultima, pagina);
+    const totalInformado = Number(r.total);
+    if (r.total !== undefined && Number.isFinite(totalInformado))
+      total = totalInformado;
+    else
+      total = Math.max(total, documentos.length);
     if (!todas || pagina >= ultima)
       break;
-    if (pagina >= MAX_PAGINAS) {
-      avisos.push(`El listado quedó incompleto: se cortó en ${MAX_PAGINAS} páginas de ${ultima}. Acota con --desde y --hasta.`);
+    if (pagina - primera + 1 >= MAX_PAGINAS) {
+      avisos.push(`El listado quedó incompleto: se bajaron ${MAX_PAGINAS} páginas y quedan hasta la ${ultima}. Acota con --desde y --hasta, o sigue con --pagina ${pagina + 1}.`);
       break;
     }
     pagina++;
   }
-  const extra = avisos.length ? { incompleto: true, avisos } : {};
+  const extra = avisos.length ? { incompleto: true, avisos, ...errorPagina ? { errorPagina } : {} } : {};
   if (folio !== undefined) {
     const buscado = entero(folio, "--folio");
     const filtrados = documentos.filter((d) => Number(d.Folio) === buscado);
@@ -1371,13 +1383,14 @@ async function referenciasLibres(ctx, rutPropio) {
   return salida;
 }
 async function notasPrevias(ctx, ref, rutPropio, receptor, avisos) {
+  const suma2 = {};
+  const folios = [];
   try {
-    const suma2 = {};
-    const folios = [];
     const filtros = { TipoDTE: { eq: 61 }, FchEmis: { gte: ref.fecha } };
     const rutRecep = Number(normalizarRut(String(receptor.RUTRecep)).split("-")[0]);
     if (rutRecep !== 66666666)
       filtros.RUTRecep = { eq: rutRecep };
+    let ultima = 1;
     for (let pagina = 1;pagina <= MAX_PAGINAS_NOTAS; pagina++) {
       const r = await ctx.client.post("/document/issued", pagina > 1 ? { ...filtros, Page: pagina } : filtros);
       for (const d of r?.data ?? []) {
@@ -1385,15 +1398,21 @@ async function notasPrevias(ctx, ref, rutPropio, receptor, avisos) {
         const refs = nc?.json?.Referencia;
         const lista2 = Array.isArray(refs) ? refs : refs ? [refs] : [];
         const apunta = lista2.some((x) => String(x.TpoDocRef) === String(ref.tipo) && Number(x.FolioRef) === ref.folio && Number(x.CodRef) !== 2);
-        if (!apunta)
+        if (!apunta || folios.includes(`61:${d.Folio}`))
           continue;
         folios.push(`61:${d.Folio}`);
         const t = numeros(nc.json.Encabezado?.Totales ?? {});
         for (const k of ["MntNeto", "MntExe", "IVA", "MntTotal"])
           suma2[k] = (suma2[k] ?? 0) + (t[k] ?? 0);
       }
-      if (!r || pagina >= Number(r.last_page ?? pagina))
+      if (r?.last_page !== undefined && Number.isInteger(Number(r.last_page)))
+        ultima = Number(r.last_page);
+      if (!r || pagina >= ultima) {
+        if (pagina < ultima) {
+          avisos.push(`La página ${pagina} de ${ultima} de notas de crédito llegó vacía: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`);
+        }
         break;
+      }
       if (pagina === MAX_PAGINAS_NOTAS) {
         avisos.push(`Hay más de ${MAX_PAGINAS_NOTAS} páginas de notas de crédito desde la fecha del original y sólo se revisaron ${MAX_PAGINAS_NOTAS}: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`);
       }
@@ -1401,7 +1420,7 @@ async function notasPrevias(ctx, ref, rutPropio, receptor, avisos) {
     return { suma: suma2, folios };
   } catch (e) {
     avisos.push(`No se pudo revisar si ya hay otras notas de crédito contra este documento (${e.message}). Revísalo con: openfactura emitidos --tipo 61`);
-    return null;
+    return folios.length ? { suma: suma2, folios } : null;
   }
 }
 
@@ -2064,7 +2083,7 @@ OpenFactura trae más documentos, alguien emitió por fuera.
 | \`OF-429\` | Límite propio de \`sincronizar-rcv\` | Espera los segundos de \`retry_after\` |
 | \`VALIDATION\` | El CLI detectó un problema antes de enviar | Lee el mensaje: dice qué corregir |
 | \`TIMEOUT\` al emitir | OpenFactura no respondió a tiempo, pero el documento pudo emitirse | Repite **exactamente** el mismo comando el mismo día: si ya se emitió, vuelve como \`yaEmitido\` |
-| \`RESPUESTA_INVALIDA\` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
+| \`INVALID_RESPONSE\` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
 
 ## Lo que la API no permite
 
@@ -2165,14 +2184,14 @@ function buscarComando(posicionales) {
   return null;
 }
 function opcionInvalida(mensaje, code) {
-  const opcion2 = /'(-[^' ]+)/.exec(mensaje)?.[1];
+  const opcion2 = /'(?:-\w, )?(--?[\w-]+)/.exec(mensaje)?.[1];
   if (!opcion2)
     return mensaje;
   if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION")
     return `La opción ${opcion2} no existe`;
   if (/does not take an argument/.test(mensaje))
     return `${opcion2} no lleva valor`;
-  if (/argument missing/.test(mensaje))
+  if (/argument missing|argument is ambiguous/.test(mensaje))
     return `${opcion2} necesita un valor`;
   return mensaje;
 }
@@ -2191,6 +2210,10 @@ async function run(argv, env, io) {
     const a = argv[i];
     const nombre = a.replace(/^--?/, "").split("=")[0];
     const conValor = nombre === "api-key" || nombre === "timeout";
+    if (nombre === "v" || nombre === "version") {
+      io.out(VERSION);
+      return 0;
+    }
     if (!(nombre in FLAGS_GLOBALES) && nombre !== "h") {
       return error(io, { error: `Opción desconocida antes del comando: ${a}. Mira openfactura --help`, code: "USAGE" }, 2);
     }

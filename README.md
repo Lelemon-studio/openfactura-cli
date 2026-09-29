@@ -113,9 +113,12 @@ indica mostrarte el resumen en seco y esperar tu aprobación antes de emitir.
 
 OpenFactura acepta 3 llamadas por segundo y 100 por minuto. El CLI espera su turno solo para no pasarse,
 así que un listado largo o una nota de crédito que revisa notas previas puede tardar. Si tu cuenta tiene
-otro límite, ajústalo con `OPENFACTURA_LIMITE=5/200`, o desactívalo con `OPENFACTURA_LIMITE=0`.
+otro límite, ajústalo con `OPENFACTURA_LIMITE=5/200`, o desactívalo con `OPENFACTURA_LIMITE=0`. El conteo
+es de cada ejecución: si lanzas varios `openfactura` en paralelo o en un loop rápido, cada uno lleva el suyo.
 
-Si un listado falla a mitad de camino, devuelve lo que alcanzó a bajar con `"incompleto": true` y un aviso.
+Si un listado falla a mitad de camino, devuelve lo que alcanzó a bajar con `"incompleto": true`, un aviso y,
+si fue un error de la API, su `code` y `status` en `errorPagina`. Sale con código `0` porque trae datos:
+revisa `incompleto` antes de dar el listado por completo.
 
 ## Ambiente de pruebas
 

@@ -56,6 +56,7 @@ async function listar(ctx: Contexto, ruta: string, filtros: Record<string, unkno
   const primera = pagina;
   let ultima = 0;
   let total = 0;
+  let errorPagina: { code: string; status: number } | undefined;
 
   for (;;) {
     const body = pagina > 1 ? { ...filtros, Page: pagina } : filtros;
@@ -64,24 +65,33 @@ async function listar(ctx: Contexto, ruta: string, filtros: Record<string, unkno
       r = (await ctx.client.post(ruta, body)) as Pagina | null;
     } catch (e) {
       if (pagina === primera) throw e;
+      if (e instanceof ApiError) errorPagina = { code: e.code, status: e.status };
       avisos.push(`El listado quedó incompleto: falló la página ${pagina} de ${ultima} (${(e as Error).message}). Lo de arriba es lo que alcanzó a bajar.`);
       break;
     }
-    if (!r) break;
+    if (!r) {
+      if (pagina > primera && pagina <= ultima)
+        avisos.push(`El listado quedó incompleto: la página ${pagina} de ${ultima} llegó vacía. Lo de arriba es lo que alcanzó a bajar.`);
+      break;
+    }
     documentos.push(...(r.data ?? []));
-    const ultimaInformada = Number(r.last_page ?? pagina);
-    ultima = Number.isInteger(ultimaInformada) && ultimaInformada >= 0 ? ultimaInformada : pagina;
-    const totalInformado = Number(r.total ?? documentos.length);
-    total = Number.isFinite(totalInformado) ? totalInformado : documentos.length;
+    const ultimaInformada = Number(r.last_page);
+    if (r.last_page !== undefined && Number.isInteger(ultimaInformada) && ultimaInformada >= 0) ultima = ultimaInformada;
+    else ultima = Math.max(ultima, pagina);
+    const totalInformado = Number(r.total);
+    if (r.total !== undefined && Number.isFinite(totalInformado)) total = totalInformado;
+    else total = Math.max(total, documentos.length);
     if (!todas || pagina >= ultima) break;
-    if (pagina >= MAX_PAGINAS) {
-      avisos.push(`El listado quedó incompleto: se cortó en ${MAX_PAGINAS} páginas de ${ultima}. Acota con --desde y --hasta.`);
+    if (pagina - primera + 1 >= MAX_PAGINAS) {
+      avisos.push(
+        `El listado quedó incompleto: se bajaron ${MAX_PAGINAS} páginas y quedan hasta la ${ultima}. Acota con --desde y --hasta, o sigue con --pagina ${pagina + 1}.`,
+      );
       break;
     }
     pagina++;
   }
 
-  const extra = avisos.length ? { incompleto: true, avisos } : {};
+  const extra = avisos.length ? { incompleto: true, avisos, ...(errorPagina ? { errorPagina } : {}) } : {};
   if (folio !== undefined) {
     const buscado = entero(folio, "--folio");
     const filtrados = documentos.filter((d) => Number(d.Folio) === buscado);

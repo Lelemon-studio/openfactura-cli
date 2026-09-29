@@ -123,6 +123,8 @@ describe("errores de opciones en español", () => {
     [["emitidos", "--nada"], /La opción --nada no existe/],
     [["emitidos", "--desde"], /--desde necesita un valor/],
     [["emitidos", "--todas=si"], /--todas no lleva valor/],
+    [["emitidos", "--help=x"], /^--help no lleva valor/],
+    [["emitidos", "--folio", "--todas"], /^--folio necesita un valor/],
   ];
   for (const [argv, esperado] of casos) {
     test(argv.join(" "), async () => {
@@ -134,4 +136,10 @@ describe("errores de opciones en español", () => {
       expect(e.error).toContain("openfactura emitidos --help");
     });
   }
+});
+
+test("-v funciona también después de una opción global", async () => {
+  const c = capturar();
+  expect(await run(["--dev", "-v"], ENV, c.io)).toBe(0);
+  expect(c.out.join("").trim()).toMatch(/^\d+\.\d+\.\d+$/);
 });

@@ -151,12 +151,13 @@ export async function notasPrevias(
   receptor: Obj,
   avisos: string[],
 ): Promise<{ suma: Obj; folios: string[] } | null> {
+  const suma: Obj = {};
+  const folios: string[] = [];
   try {
-    const suma: Obj = {};
-    const folios: string[] = [];
     const filtros: Obj = { TipoDTE: { eq: 61 }, FchEmis: { gte: ref.fecha } };
     const rutRecep = Number(normalizarRut(String(receptor.RUTRecep)).split("-")[0]);
     if (rutRecep !== 66666666) filtros.RUTRecep = { eq: rutRecep };
+    let ultima = 1;
     for (let pagina = 1; pagina <= MAX_PAGINAS_NOTAS; pagina++) {
       const r = (await ctx.client.post("/document/issued", pagina > 1 ? { ...filtros, Page: pagina } : filtros)) as Obj | null;
       for (const d of r?.data ?? []) {
@@ -164,12 +165,20 @@ export async function notasPrevias(
         const refs = nc?.json?.Referencia;
         const lista = Array.isArray(refs) ? refs : refs ? [refs] : [];
         const apunta = lista.some((x: Obj) => String(x.TpoDocRef) === String(ref.tipo) && Number(x.FolioRef) === ref.folio && Number(x.CodRef) !== 2);
-        if (!apunta) continue;
+        if (!apunta || folios.includes(`61:${d.Folio}`)) continue;
         folios.push(`61:${d.Folio}`);
         const t = numeros(nc!.json.Encabezado?.Totales ?? {});
         for (const k of ["MntNeto", "MntExe", "IVA", "MntTotal"]) suma[k] = (suma[k] ?? 0) + (t[k] ?? 0);
       }
-      if (!r || pagina >= Number(r.last_page ?? pagina)) break;
+      if (r?.last_page !== undefined && Number.isInteger(Number(r.last_page))) ultima = Number(r.last_page);
+      if (!r || pagina >= ultima) {
+        if (pagina < ultima) {
+          avisos.push(
+            `La página ${pagina} de ${ultima} de notas de crédito llegó vacía: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`,
+          );
+        }
+        break;
+      }
       if (pagina === MAX_PAGINAS_NOTAS) {
         avisos.push(
           `Hay más de ${MAX_PAGINAS_NOTAS} páginas de notas de crédito desde la fecha del original y sólo se revisaron ${MAX_PAGINAS_NOTAS}: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`,
@@ -181,6 +190,6 @@ export async function notasPrevias(
     avisos.push(
       `No se pudo revisar si ya hay otras notas de crédito contra este documento (${(e as Error).message}). Revísalo con: openfactura emitidos --tipo 61`,
     );
-    return null;
+    return folios.length ? { suma, folios } : null;
   }
 }

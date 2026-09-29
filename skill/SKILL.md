@@ -174,7 +174,7 @@ OpenFactura trae más documentos, alguien emitió por fuera.
 | `OF-429` | Límite propio de `sincronizar-rcv` | Espera los segundos de `retry_after` |
 | `VALIDATION` | El CLI detectó un problema antes de enviar | Lee el mensaje: dice qué corregir |
 | `TIMEOUT` al emitir | OpenFactura no respondió a tiempo, pero el documento pudo emitirse | Repite **exactamente** el mismo comando el mismo día: si ya se emitió, vuelve como `yaEmitido` |
-| `RESPUESTA_INVALIDA` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
+| `INVALID_RESPONSE` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
 
 ## Lo que la API no permite
 
