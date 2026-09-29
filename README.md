@@ -18,11 +18,16 @@ funciona igual a mano.
 Necesitas Node 20 o superior.
 
 ```bash
-npm install -g github:Lelemon-studio/openfactura-cli
+npm install -g https://github.com/Lelemon-studio/openfactura-cli/releases/download/v0.1.0/openfactura-cli-0.1.0.tgz
 openfactura --version
 ```
 
-O desde una copia local: `git clone https://github.com/Lelemon-studio/openfactura-cli && cd openfactura-cli && npm install -g .`
+Las versiones están en [Releases](https://github.com/Lelemon-studio/openfactura-cli/releases). También
+funciona desde una copia local: `git clone https://github.com/Lelemon-studio/openfactura-cli`, y dentro de
+la carpeta `npm install -g .`
+
+En Windows, evita `npm install -g github:Lelemon-studio/openfactura-cli`: npm deja el comando apuntando a
+una carpeta temporal que después borra, y `openfactura` falla con `Cannot find module`.
 
 Sin Node, el binario de Windows se arma con `bun run build` y queda en `dist/openfactura.exe`. Para
 otros sistemas: `bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/openfactura`
