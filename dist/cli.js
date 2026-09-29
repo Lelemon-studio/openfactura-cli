@@ -3,6 +3,47 @@
 // src/cli.ts
 import { parseArgs } from "node:util";
 
+// src/limitador.ts
+class Limitador {
+  marcas = [];
+  cola = Promise.resolve();
+  ahora;
+  esperar;
+  porSegundo;
+  porMinuto;
+  constructor(opciones = {}) {
+    this.ahora = opciones.ahora ?? (() => performance.now());
+    this.esperar = opciones.esperar ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.porSegundo = opciones.porSegundo ?? 3;
+    this.porMinuto = opciones.porMinuto ?? 100;
+  }
+  turno() {
+    const siguiente = this.cola.then(() => this.esperarCupo());
+    this.cola = siguiente.catch(() => {
+      return;
+    });
+    return siguiente;
+  }
+  async esperarCupo() {
+    for (;; ) {
+      const t = this.ahora();
+      while (this.marcas.length && this.marcas[0] <= t - 60000)
+        this.marcas.shift();
+      const ultimoSegundo = this.marcas.filter((m) => m > t - 1000);
+      let espera = 0;
+      if (ultimoSegundo.length >= this.porSegundo)
+        espera = ultimoSegundo[ultimoSegundo.length - this.porSegundo] + 1000 - t;
+      if (this.marcas.length >= this.porMinuto)
+        espera = Math.max(espera, this.marcas[this.marcas.length - this.porMinuto] + 60000 - t);
+      if (espera <= 0) {
+        this.marcas.push(t);
+        return;
+      }
+      await this.esperar(espera);
+    }
+  }
+}
+
 // src/client.ts
 class ApiError extends Error {
   status;
@@ -40,8 +81,10 @@ function parsear(texto) {
 
 class OpenFacturaClient {
   opts;
+  limitador;
   constructor(opts) {
     this.opts = opts;
+    this.limitador = opts.limite ? new Limitador({ ...opts.limite, esperar: opts.esperar, ahora: opts.ahora }) : null;
   }
   get(path) {
     return this.request("GET", path);
@@ -74,6 +117,7 @@ class OpenFacturaClient {
       headers["Content-Type"] = "application/json";
     if (options.idempotencyKey)
       headers["Idempotency-Key"] = options.idempotencyKey;
+    await this.limitador?.turno();
     const control = new AbortController;
     let vencido = false;
     const reloj = setTimeout(() => {
@@ -143,7 +187,21 @@ function resolveConfig(flags, env) {
     throw new ConfigError(`OPENFACTURA_ENV="${envVar}" no existe. Usa "prod" o "dev".`);
   }
   const ambiente = flags.dev || envVar === "dev" ? "dev" : "prod";
-  return { apiKey, env: ambiente, baseUrl: BASE_URLS[ambiente], timeoutMs: flags.timeoutMs ?? 60000 };
+  return { apiKey, env: ambiente, baseUrl: BASE_URLS[ambiente], timeoutMs: flags.timeoutMs ?? 60000, limite: limite(env.OPENFACTURA_LIMITE) };
+}
+function limite(valor) {
+  const v = valor?.trim();
+  if (!v)
+    return { porSegundo: 3, porMinuto: 100 };
+  if (v === "0")
+    return null;
+  const m = /^(\d+)\/(\d+)$/.exec(v);
+  const porSegundo = Number(m?.[1]);
+  const porMinuto = Number(m?.[2]);
+  if (!m || porSegundo < 1 || porMinuto < 1) {
+    throw new ConfigError(`OPENFACTURA_LIMITE="${v}" no se entiende. Usa llamadas por segundo y por minuto, como "3/100", o "0" para desactivarlo.`);
+  }
+  return { porSegundo, porMinuto };
 }
 
 // src/command.ts
@@ -174,6 +232,11 @@ function arg(ctx, i, nombre) {
   if (v === undefined)
     throw new UsageError(`Falta el argumento <${nombre}>`);
   return v;
+}
+function entero(valor, nombre) {
+  if (valor === undefined || !/^\d+$/.test(valor.trim()))
+    throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
+  return Number(valor);
 }
 
 // src/commands/lecturas.ts
@@ -242,21 +305,14 @@ function rutCuerpo(entrada) {
 }
 
 // src/commands/lecturas.ts
-var PAUSA_ENTRE_PAGINAS_MS = 350;
 var MAX_PAGINAS = 500;
-var esperar = (ms) => new Promise((r) => setTimeout(r, ms));
-function entero(valor, nombre) {
-  if (valor === undefined || !/^\d+$/.test(valor.trim()))
-    throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
-  return Number(valor);
-}
 async function rutEmisor(ctx) {
   const dado = texto(ctx.flags, "rut");
   if (dado)
     return normalizarRut(dado);
   const org = await ctx.client.get("/organization");
   if (!org?.rut)
-    throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "SIN_EMISOR");
+    throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "NO_ISSUER");
   return normalizarRut(org.rut);
 }
 function enSeco(ctx, accion, endpoint, body, ejecutar) {
@@ -293,29 +349,57 @@ async function listar(ctx, ruta, filtros) {
   if (folio !== undefined && texto(ctx.flags, "pagina"))
     throw new UsageError("--folio recorre todas las páginas: no se combina con --pagina");
   const documentos = [];
+  const avisos = [];
+  const primera = pagina;
   let ultima = 0;
   let total = 0;
+  let errorPagina;
   for (;; ) {
     const body = pagina > 1 ? { ...filtros, Page: pagina } : filtros;
-    const r = await ctx.client.post(ruta, body);
-    if (!r)
+    let r;
+    try {
+      r = await ctx.client.post(ruta, body);
+    } catch (e) {
+      if (pagina === primera)
+        throw e;
+      if (e instanceof ApiError)
+        errorPagina = { code: e.code, status: e.status };
+      avisos.push(`El listado quedó incompleto: falló la página ${pagina} de ${ultima} (${e.message}). Lo de arriba es lo que alcanzó a bajar.`);
       break;
+    }
+    if (!r) {
+      if (pagina > primera && pagina <= ultima)
+        avisos.push(`El listado quedó incompleto: la página ${pagina} de ${ultima} llegó vacía. Lo de arriba es lo que alcanzó a bajar.`);
+      break;
+    }
     documentos.push(...r.data ?? []);
-    const ultimaInformada = Number(r.last_page ?? pagina);
-    ultima = Number.isInteger(ultimaInformada) && ultimaInformada >= 0 ? ultimaInformada : pagina;
-    const totalInformado = Number(r.total ?? documentos.length);
-    total = Number.isFinite(totalInformado) ? totalInformado : documentos.length;
-    if (!todas || pagina >= ultima || pagina >= MAX_PAGINAS)
+    const ultimaInformada = Number(r.last_page);
+    if (r.last_page !== undefined && Number.isInteger(ultimaInformada) && ultimaInformada >= 0)
+      ultima = ultimaInformada;
+    else
+      ultima = Math.max(ultima, pagina);
+    const totalInformado = Number(r.total);
+    if (r.total !== undefined && Number.isFinite(totalInformado))
+      total = totalInformado;
+    else
+      total = Math.max(total, documentos.length);
+    if (!todas || pagina >= ultima)
       break;
+    if (pagina - primera + 1 >= MAX_PAGINAS) {
+      avisos.push(`El listado quedó incompleto: se bajaron ${MAX_PAGINAS} páginas y quedan hasta la ${ultima}. Acota con --desde y --hasta, o sigue con --pagina ${pagina + 1}.`);
+      break;
+    }
     pagina++;
-    await esperar(PAUSA_ENTRE_PAGINAS_MS);
   }
+  const extra = avisos.length ? { incompleto: true, avisos, ...errorPagina ? { errorPagina } : {} } : {};
   if (folio !== undefined) {
     const buscado = entero(folio, "--folio");
     const filtrados = documentos.filter((d) => Number(d.Folio) === buscado);
-    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados };
+    if (avisos.length && !filtrados.length)
+      avisos.push(`El folio ${buscado} no apareció, pero no se revisaron todas las páginas: puede existir igual.`);
+    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados, ...extra };
   }
-  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos };
+  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos, ...extra };
 }
 var FLAGS_LISTA = {
   desde: { type: "string" },
@@ -372,12 +456,12 @@ async function documento(ctx) {
   const campo = accion === "xml" ? "xml" : "pdf";
   const b64 = r?.[campo];
   if (typeof b64 !== "string" || b64 === "")
-    throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "SIN_ARCHIVO");
+    throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "NO_FILE");
   if (!/^[A-Za-z0-9+/\s]+={0,2}\s*$/.test(b64))
-    throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "ARCHIVO_INVALIDO");
+    throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "INVALID_FILE");
   const bytes = Buffer.from(b64, "base64");
   if (campo === "pdf" && bytes.subarray(0, 4).toString("latin1") !== "%PDF") {
-    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "PDF_INVALIDO");
+    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "INVALID_PDF");
   }
   const sufijo = accion === "cedible" ? "_cedible.pdf" : accion === "xml" ? ".xml" : ".pdf";
   return guardarArchivo(texto(ctx.flags, "salida") ?? `${nombreBase}${sufijo}`, bytes, Boolean(ctx.flags.sobrescribir));
@@ -403,7 +487,7 @@ var LECTURAS = [
   {
     nombre: "folios",
     maxArgs: 0,
-    resumen: "Tipos de documento autorizados y folios disponibles",
+    resumen: "Tipos de documento autorizados (el contador de folios no es confiable)",
     uso: [
       "openfactura folios",
       "",
@@ -415,6 +499,7 @@ var LECTURAS = [
   },
   {
     nombre: "contribuyente",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Ficha del SII de cualquier RUT: razón social, giro, dirección y sucursales",
     uso: [
@@ -429,7 +514,7 @@ var LECTURAS = [
       const rut = normalizarRut(arg(ctx, 0, "rut"));
       const crudo = await ctx.client.get(`/taxpayer/${rut}`);
       if (crudo !== null && (typeof crudo !== "object" || Array.isArray(crudo))) {
-        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "RESPUESTA_INVALIDA");
+        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "INVALID_RESPONSE");
       }
       const r = crudo ?? {};
       const actividades = Array.isArray(r.actividades) ? r.actividades : [];
@@ -440,6 +525,7 @@ var LECTURAS = [
   },
   {
     nombre: "documento",
+    minArgs: 1,
     maxArgs: 3,
     resumen: "Estado ante el SII, JSON, XML, PDF o copia cedible de un documento",
     uso: [
@@ -524,6 +610,7 @@ var LECTURAS = [
   },
   {
     nombre: "acusar",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Acepta o reclama un documento recibido ante el SII (pide --confirmar)",
     uso: [
@@ -551,6 +638,7 @@ var LECTURAS = [
   },
   {
     nombre: "ventas",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de ventas de un mes o un día, por tipo de documento",
     uso: "openfactura ventas <AAAA-MM | AAAA-MM-DD>",
@@ -558,11 +646,10 @@ var LECTURAS = [
   },
   {
     nombre: "compras",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de compras de un mes o un día, separado por estado",
-    uso: [
-      "openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]"
-    ].join(`
+    uso: ["openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]"].join(`
 `),
     flags: { estado: { type: "string" } },
     run: (ctx) => {
@@ -582,6 +669,7 @@ var LECTURAS = [
   },
   {
     nombre: "sincronizar-rcv",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Pide a OpenFactura traer del SII el registro de compras o ventas de un mes",
     uso: [
@@ -603,6 +691,7 @@ var LECTURAS = [
   },
   {
     nombre: "anular-guia",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Anula una guía de despacho (52) ante el SII (pide --confirmar)",
     uso: [
@@ -621,164 +710,6 @@ var LECTURAS = [
     }
   }
 ];
-
-// src/commands/emitir.ts
-import { createHash } from "node:crypto";
-import { existsSync as existsSync2, readFileSync, statSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname, resolve } from "node:path";
-
-// src/dte/items.ts
-var MAX_NOMBRE_ITEM = 80;
-var MAX_DECIMALES = 6;
-var MAX_MONTO = 999999999999;
-var GUIONES_LARGOS = /[‒–—―−]/g;
-var CAMPOS_JSON = new Set(["nombre", "cantidad", "precio", "exento", "descripcion"]);
-var FORMATO = 'Cada --item va como "nombre|cantidad|precio" (agrega "|exento" si corresponde) o como JSON: ' + '{"nombre":"...","cantidad":1,"precio":1000,"exento":false,"descripcion":"..."}';
-function numeroEstricto(valor, campo, prefijo) {
-  let n;
-  if (typeof valor === "number") {
-    n = valor;
-  } else if (typeof valor === "string") {
-    const t = valor.trim();
-    if (/^[1-9]\d{0,2}([.,]\d{3})+$/.test(t)) {
-      throw new ValidationError(`${prefijo}: ${campo} "${valor}" es ambiguo. Escribe el número sin separador de miles: ${t.replace(/[.,]/g, "")}`);
-    }
-    if (!/^\d+([.,]\d+)?$/.test(t))
-      throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número. ${FORMATO}`);
-    n = Number(t.replace(",", "."));
-  } else {
-    throw new ValidationError(`${prefijo}: falta ${campo}. ${FORMATO}`);
-  }
-  if (!Number.isFinite(n) || n < 0)
-    throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número válido`);
-  const decimales = (String(n).split(".")[1] ?? "").length;
-  if (decimales > MAX_DECIMALES || String(n).includes("e")) {
-    throw new ValidationError(`${prefijo}: ${campo} admite hasta ${MAX_DECIMALES} decimales y un tamaño razonable`);
-  }
-  if (n > MAX_MONTO)
-    throw new ValidationError(`${prefijo}: ${campo} ${valor} es demasiado grande`);
-  return n;
-}
-function limpiarNombre(nombre, i, avisos) {
-  const sinGuiones = nombre.replace(GUIONES_LARGOS, "-");
-  if (sinGuiones !== nombre)
-    avisos.push(`Ítem ${i}: se cambió el guion largo por uno corto, porque OpenFactura lo borra`);
-  const limpio = sinGuiones.replace(/\s{2,}/g, " ").trim();
-  if (!limpio)
-    throw new ValidationError(`Ítem ${i}: falta el nombre. ${FORMATO}`);
-  if (limpio.length > MAX_NOMBRE_ITEM) {
-    throw new ValidationError(`Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${MAX_NOMBRE_ITEM}. Pon el detalle en "descripcion"`);
-  }
-  return limpio;
-}
-function parsearItem(texto2, i, avisos) {
-  const t = texto2.trim();
-  const prefijo = `Ítem ${i}`;
-  if (t.startsWith("{")) {
-    let o;
-    try {
-      o = JSON.parse(t);
-    } catch {
-      throw new ValidationError(`${prefijo}: el JSON no es válido. ${FORMATO}`);
-    }
-    const desconocidos = Object.keys(o).filter((k) => !CAMPOS_JSON.has(k));
-    if (desconocidos.length) {
-      throw new ValidationError(`${prefijo}: campos desconocidos ${desconocidos.join(", ")}. Los válidos son ${[...CAMPOS_JSON].join(", ")}`);
-    }
-    if (o.exento !== undefined && typeof o.exento !== "boolean")
-      throw new ValidationError(`${prefijo}: "exento" debe ser true o false, sin comillas`);
-    if (o.descripcion !== undefined && typeof o.descripcion !== "string")
-      throw new ValidationError(`${prefijo}: "descripcion" debe ser texto`);
-    const linea = {
-      nombre: limpiarNombre(String(o.nombre ?? ""), i, avisos),
-      cantidad: numeroEstricto(o.cantidad ?? 1, "la cantidad", prefijo),
-      precio: numeroEstricto(o.precio, "el precio", prefijo),
-      exento: o.exento === true
-    };
-    if (typeof o.descripcion === "string" && o.descripcion.trim())
-      linea.descripcion = o.descripcion.trim();
-    return linea;
-  }
-  const partes = t.split("|").map((p) => p.trim());
-  if (partes.length < 3 || partes.length > 4)
-    throw new ValidationError(`${prefijo}: "${texto2}" no tiene el formato esperado. ${FORMATO}`);
-  const [nombre, cantidad, precio, marca] = partes;
-  if (marca !== undefined && marca.toLowerCase() !== "exento") {
-    throw new ValidationError(`${prefijo}: el cuarto campo sólo puede ser "exento". ${FORMATO}`);
-  }
-  return {
-    nombre: limpiarNombre(nombre, i, avisos),
-    cantidad: numeroEstricto(cantidad, "la cantidad", prefijo),
-    precio: numeroEstricto(precio, "el precio", prefijo),
-    exento: marca !== undefined
-  };
-}
-
-// src/dte/partes.ts
-var MAX_GIRO_RECEPTOR = 40;
-var RECEPTOR_CONSUMIDOR_FINAL = {
-  RUTRecep: "66666666-6",
-  RznSocRecep: "Cliente",
-  DirRecep: "Sin direccion",
-  CmnaRecep: "Santiago"
-};
-var limpio = (v) => typeof v === "string" ? v.replace(/\s{2,}/g, " ").trim() : "";
-function actividades(ficha) {
-  return Array.isArray(ficha.actividades) ? ficha.actividades : [];
-}
-function principal(ficha) {
-  const lista = actividades(ficha).filter((a) => a.giro || a.codigoActividadEconomica);
-  return lista.find((a) => a.actividadPrincipal) ?? lista[0];
-}
-function emisorDesdeOrganizacion(org, esBoleta, acteco) {
-  const rut = limpio(org.rut);
-  const razon = limpio(org.razonSocial);
-  const giro = limpio(org.glosaDescriptiva) || limpio(principal(org)?.giro);
-  const dir = limpio(org.direccion);
-  const comuna = limpio(org.comuna);
-  const faltan = [!rut && "rut", !razon && "razón social", !giro && "giro", !dir && "dirección", !comuna && "comuna"].filter(Boolean);
-  if (faltan.length)
-    throw new ValidationError(`OpenFactura no devolvió estos datos del emisor: ${faltan.join(", ")}`);
-  const sucursal = limpio(org.cdgSIISucur);
-  if (esBoleta) {
-    return { RUTEmisor: rut, RznSocEmisor: razon, GiroEmisor: giro, DirOrigen: dir, CmnaOrigen: comuna, ...sucursal ? { CdgSIISucur: sucursal } : {} };
-  }
-  const codigo = acteco ?? Number(principal(org)?.codigoActividadEconomica);
-  if (!Number.isInteger(codigo) || codigo <= 0) {
-    throw new ValidationError("No se encontró la actividad económica del emisor. Pásala con --acteco <código>");
-  }
-  return { RUTEmisor: rut, RznSoc: razon, GiroEmis: giro, Acteco: codigo, DirOrigen: dir, CmnaOrigen: comuna, ...sucursal ? { CdgSIISucur: sucursal } : {} };
-}
-function receptorDesdeFicha(rut, ficha, manual, esBoleta, avisos) {
-  const encontrado = Boolean(ficha.razonSocial || ficha.direccion);
-  const razon = manual.razonSocial ?? limpio(ficha.razonSocial);
-  const direccion = manual.direccion ?? limpio(ficha.direccion);
-  const comuna = manual.comuna ?? limpio(ficha.comuna);
-  if (!razon) {
-    throw new ValidationError(encontrado ? `El SII no trae razón social para ${rut}. Pásala con --razon-social` : `El SII no conoce el RUT ${rut}. Revisa el RUT o pasa los datos a mano con --razon-social, --direccion y --comuna`);
-  }
-  const receptor = { RUTRecep: rut, RznSocRecep: razon };
-  if (!esBoleta) {
-    let giro = manual.giro ?? limpio(principal(ficha)?.giro);
-    if (!giro) {
-      throw new ValidationError(`${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. ` + "Si sabes que sí tiene giro, pásalo con --giro");
-    }
-    if (giro.length > MAX_GIRO_RECEPTOR) {
-      avisos.push(`El giro del receptor se recortó a ${MAX_GIRO_RECEPTOR} caracteres, que es lo que admite el SII`);
-      giro = giro.slice(0, MAX_GIRO_RECEPTOR);
-    }
-    receptor.GiroRecep = giro;
-    if (manual.contacto)
-      receptor.Contacto = manual.contacto;
-  }
-  if (!direccion || !comuna)
-    throw new ValidationError(`Faltan la dirección o la comuna de ${razon}. Pásalas con --direccion y --comuna`);
-  receptor.DirRecep = direccion;
-  receptor.CmnaRecep = comuna;
-  if (manual.correo)
-    receptor.CorreoRecep = manual.correo;
-  return receptor;
-}
 
 // src/dte/totales.ts
 var TASA_IVA = 19;
@@ -836,7 +767,7 @@ function calcularTotales(modo, entrada, opciones = {}) {
   return { lineas, totales, avisos };
 }
 
-// src/commands/emitir.ts
+// src/commands/emitir/comun.ts
 var TIPOS = {
   factura: { codigo: 33, modo: "neto", boleta: false, receptor: "obligatorio", nota: false, guia: false },
   "factura-exenta": { codigo: 34, modo: "exento", boleta: false, receptor: "obligatorio", nota: false, guia: false },
@@ -870,8 +801,6 @@ var CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 var VIGENCIA_RES_154 = "2026-11-01";
 var UMBRAL_BOLETA_IDENTIFICADA = 5000000;
 var MESES_PLAZO_REBAJA = 6;
-var MAX_NMB_ITEM = 80;
-var MAX_RAZON_REF = 90;
 var MAX_ESPERA_S = 3600;
 var MAX_PAGINAS_NOTAS = 10;
 function opcion(mapa, valor, flag) {
@@ -897,7 +826,7 @@ function detalle(lineas) {
     NmbItem: l.nombre,
     ...l.descripcion ? { DscItem: l.descripcion } : {},
     QtyItem: l.cantidad,
-    PrcItem: l.precio,
+    ...l.precio > 0 ? { PrcItem: l.precio } : {},
     MontoItem: l.monto,
     ...l.exento ? { IndExe: 1 } : {}
   }));
@@ -917,6 +846,412 @@ function totalesDte(totales, tipo, modo) {
     return t;
   return { MntNeto: t.MntNeto ?? 0, ...t.MntExe ? { MntExe: t.MntExe } : {}, TasaIVA: TASA_IVA, IVA: t.IVA ?? 0, MntTotal: t.MntTotal ?? 0 };
 }
+
+// src/dte/esquema.ts
+var ORDEN_DTE = {
+  Documento: ["Encabezado", "Detalle", "SubTotInfo", "DscRcgGlobal", "Referencia", "GeoRefEmision", "ManejoMadera", "Comisiones"],
+  Encabezado: ["IdDoc", "Emisor", "RUTMandante", "Receptor", "RUTSolicita", "Transporte", "Totales", "OtraMoneda"],
+  IdDoc: [
+    "TipoDTE",
+    "Folio",
+    "FchEmis",
+    "IndNoRebaja",
+    "TipoDespacho",
+    "IndTraslado",
+    "TpoImpresion",
+    "IndServicio",
+    "MntBruto",
+    "TpoTranCompra",
+    "TpoTranVenta",
+    "FmaPago",
+    "FmaPagExp",
+    "FchCancel",
+    "MntCancel",
+    "SaldoInsol",
+    "MntPagos",
+    "PeriodoDesde",
+    "PeriodoHasta",
+    "MedioPago",
+    "TpoCtaPago",
+    "NumCtaPago",
+    "BcoPago",
+    "TermPagoCdg",
+    "TermPagoGlosa",
+    "TermPagoDias",
+    "FchVenc",
+    "TipoFactEsp"
+  ],
+  Emisor: [
+    "RUTEmisor",
+    "RznSoc",
+    "GiroEmis",
+    "Telefono",
+    "CorreoEmisor",
+    "Acteco",
+    "GuiaExport",
+    "Sucursal",
+    "CdgSIISucur",
+    "DirOrigen",
+    "CmnaOrigen",
+    "CiudadOrigen",
+    "CdgVendedor",
+    "IdAdicEmisor",
+    "RUTProveedor",
+    "RznSocProveedor"
+  ],
+  Receptor: [
+    "RUTRecep",
+    "CdgIntRecep",
+    "RznSocRecep",
+    "Extranjero",
+    "GiroRecep",
+    "Contacto",
+    "CorreoRecep",
+    "DirRecep",
+    "CmnaRecep",
+    "CiudadRecep",
+    "DirPostal",
+    "CmnaPostal",
+    "CiudadPostal"
+  ],
+  Transporte: ["Patente", "PatenteCarro", "RUTTrans", "Chofer", "DirDest", "CmnaDest", "CiudadDest", "Aduana", "FchSalida", "HraSalida", "FchLlegada"],
+  Chofer: ["RUTChofer", "NombreChofer"],
+  Totales: [
+    "MntNeto",
+    "MntExe",
+    "MntBase",
+    "MntMargenCom",
+    "TasaIVA",
+    "IVA",
+    "IVAProp",
+    "IVATerc",
+    "ImptoReten",
+    "IVANoRet",
+    "CredEC",
+    "GrntDep",
+    "Comisiones",
+    "MntTotal",
+    "MontoNF",
+    "MontoPeriodo",
+    "SaldoAnterior",
+    "VlrPagar"
+  ],
+  Detalle: [
+    "NroLinDet",
+    "CdgItem",
+    "IndExe",
+    "Retenedor",
+    "NmbItem",
+    "DscItem",
+    "QtyRef",
+    "UnmdRef",
+    "PrcRef",
+    "QtyItem",
+    "Subcantidad",
+    "FchElabor",
+    "FchVencim",
+    "UnmdItem",
+    "PrcItem",
+    "OtrMnda",
+    "DescuentoPct",
+    "DescuentoMonto",
+    "SubDscto",
+    "RecargoPct",
+    "RecargoMonto",
+    "SubRecargo",
+    "CodImpAdic",
+    "MontoItem"
+  ],
+  Referencia: ["NroLinRef", "TpoDocRef", "IndGlobal", "FolioRef", "RUTOtr", "FchRef", "CodRef", "RazonRef"]
+};
+var ORDEN_BOLETA = {
+  Documento: ["Encabezado", "Detalle", "SubTotInfo", "DscRcgGlobal", "Referencia", "GeoRefEmision"],
+  Encabezado: ["IdDoc", "Emisor", "Receptor", "RUTProvSW", "Totales"],
+  IdDoc: ["TipoDTE", "Folio", "FchEmis", "IndServicio", "IndMntNeto", "PeriodoDesde", "PeriodoHasta", "FchVenc", "MedioPago"],
+  Emisor: ["RUTEmisor", "RznSocEmisor", "GiroEmisor", "CdgSIISucur", "DirOrigen", "CmnaOrigen", "CiudadOrigen"],
+  Receptor: [
+    "RUTRecep",
+    "CdgIntRecep",
+    "RznSocRecep",
+    "Contacto",
+    "CorreoRecep",
+    "TelefonoRecep",
+    "DirRecep",
+    "CmnaRecep",
+    "CiudadRecep",
+    "DirPostal",
+    "CmnaPostal",
+    "CiudadPostal"
+  ],
+  Totales: ["MntNeto", "MntExe", "IVA", "MntTotal", "MontoNF", "TotalPeriodo", "SaldoAnterior", "VlrPagar"],
+  Detalle: [
+    "NroLinDet",
+    "CdgItem",
+    "IndExe",
+    "ItemEspectaculo",
+    "RUTMandante",
+    "NmbItem",
+    "InfoTicket",
+    "DscItem",
+    "QtyItem",
+    "UnmdItem",
+    "PrcItem",
+    "DescuentoPct",
+    "DescuentoMonto",
+    "RecargoPct",
+    "RecargoMonto",
+    "MontoItem"
+  ],
+  Referencia: ["NroLinRef", "TpoDocRef", "FolioRef", "CodRef", "RazonRef", "CodVndor", "CodCaja"]
+};
+var LARGOS = {
+  RznSoc: 100,
+  RznSocEmisor: 100,
+  GiroEmis: 80,
+  GiroEmisor: 80,
+  DirOrigen: 70,
+  CmnaOrigen: 20,
+  RznSocRecep: 100,
+  GiroRecep: 40,
+  Contacto: 80,
+  CorreoRecep: 80,
+  DirRecep: 70,
+  CmnaRecep: 20,
+  NmbItem: 80,
+  DscItem: 1000,
+  RazonRef: 90,
+  FolioRef: 18,
+  Patente: 8,
+  PatenteCarro: 8,
+  NombreChofer: 30,
+  DirDest: 70,
+  CmnaDest: 20
+};
+function largoMaximo(campo) {
+  return LARGOS[campo];
+}
+var MAX_LINEAS = { dte: 60, boleta: 1000 };
+var MAX_REFERENCIAS = 40;
+function ordenar(valor, seccion, orden) {
+  if (Array.isArray(valor))
+    return valor.map((v) => ordenar(v, seccion, orden));
+  const claves = orden[seccion];
+  if (!claves || !valor || typeof valor !== "object")
+    return valor;
+  const o = valor;
+  const conocidas = claves.filter((k) => (k in o));
+  const otras = Object.keys(o).filter((k) => !claves.includes(k));
+  const salida = {};
+  for (const k of [...conocidas, ...otras])
+    salida[k] = orden[k] ? ordenar(o[k], k, orden) : o[k];
+  return salida;
+}
+function ordenarDte(dte, esBoleta) {
+  return ordenar(dte, "Documento", esBoleta ? ORDEN_BOLETA : ORDEN_DTE);
+}
+function revisarLargos(valor, ruta, errores) {
+  if (Array.isArray(valor)) {
+    for (const [i, v] of valor.entries())
+      revisarLargos(v, `${ruta}[${i + 1}]`, errores);
+    return;
+  }
+  if (!valor || typeof valor !== "object")
+    return;
+  for (const [k, v] of Object.entries(valor)) {
+    const limite2 = largoMaximo(k);
+    if (limite2 !== undefined && typeof v === "string" && v.length > limite2) {
+      errores.push(`${ruta}.${k} tiene ${v.length} caracteres y el SII admite ${limite2}`);
+    } else if (limite2 !== undefined && typeof v === "number" && String(v).length > limite2) {
+      errores.push(`${ruta}.${k} tiene ${String(v).length} dígitos y el SII admite ${limite2}`);
+    }
+    revisarLargos(v, `${ruta}.${k}`, errores);
+  }
+}
+function validarContraEsquema(dte, esBoleta) {
+  const errores = [];
+  const maxLineas = esBoleta ? MAX_LINEAS.boleta : MAX_LINEAS.dte;
+  if (Array.isArray(dte.Detalle) && dte.Detalle.length > maxLineas) {
+    errores.push(`El documento tiene ${dte.Detalle.length} líneas de detalle y el SII admite ${maxLineas}`);
+  }
+  if (Array.isArray(dte.Referencia) && dte.Referencia.length > MAX_REFERENCIAS) {
+    errores.push(`El documento tiene ${dte.Referencia.length} referencias y el SII admite ${MAX_REFERENCIAS}`);
+  }
+  revisarLargos(dte, "dte", errores);
+  if (errores.length)
+    throw new ValidationError(`El documento no cumple el formato del SII: ${errores.join("; ")}`, errores);
+}
+
+// src/dte/items.ts
+var MAX_DECIMALES = 6;
+var MAX_MONTO = 999999999999;
+var GUIONES_LARGOS = /[‒–—―−]/g;
+var CAMPOS_JSON = new Set(["nombre", "cantidad", "precio", "exento", "descripcion"]);
+var FORMATO = 'Cada --item va como "nombre|cantidad|precio" (agrega "|exento" si corresponde) o como JSON: ' + '{"nombre":"...","cantidad":1,"precio":1000,"exento":false,"descripcion":"..."}';
+function numeroEstricto(valor, campo, prefijo) {
+  let n;
+  if (typeof valor === "number") {
+    n = valor;
+  } else if (typeof valor === "string") {
+    const t = valor.trim();
+    if (/^[1-9]\d{0,2}([.,]\d{3})+$/.test(t)) {
+      throw new ValidationError(`${prefijo}: ${campo} "${valor}" es ambiguo. Escribe el número sin separador de miles: ${t.replace(/[.,]/g, "")}`);
+    }
+    if (!/^\d+([.,]\d+)?$/.test(t))
+      throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número. ${FORMATO}`);
+    n = Number(t.replace(",", "."));
+  } else {
+    throw new ValidationError(`${prefijo}: falta ${campo}. ${FORMATO}`);
+  }
+  if (!Number.isFinite(n) || n < 0)
+    throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número válido`);
+  const decimales = (String(n).split(".")[1] ?? "").length;
+  if (decimales > MAX_DECIMALES || String(n).includes("e")) {
+    throw new ValidationError(`${prefijo}: ${campo} admite hasta ${MAX_DECIMALES} decimales y un tamaño razonable`);
+  }
+  if (n > MAX_MONTO)
+    throw new ValidationError(`${prefijo}: ${campo} ${valor} es demasiado grande`);
+  return n;
+}
+function limpiarNombre(nombre, i, avisos) {
+  const sinGuiones = nombre.replace(GUIONES_LARGOS, "-");
+  if (sinGuiones !== nombre)
+    avisos.push(`Ítem ${i}: se cambió el guion largo por uno corto, porque OpenFactura lo borra`);
+  const limpio = sinGuiones.replace(/\s{2,}/g, " ").trim();
+  if (!limpio)
+    throw new ValidationError(`Ítem ${i}: falta el nombre. ${FORMATO}`);
+  if (limpio.length > LARGOS.NmbItem) {
+    throw new ValidationError(`Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${LARGOS.NmbItem}. Pon el detalle en "descripcion"`);
+  }
+  return limpio;
+}
+function parsearItem(texto2, i, avisos) {
+  const t = texto2.trim();
+  const prefijo = `Ítem ${i}`;
+  if (t.startsWith("{")) {
+    let o;
+    try {
+      o = JSON.parse(t);
+    } catch {
+      throw new ValidationError(`${prefijo}: el JSON no es válido. ${FORMATO}`);
+    }
+    const desconocidos = Object.keys(o).filter((k) => !CAMPOS_JSON.has(k));
+    if (desconocidos.length) {
+      throw new ValidationError(`${prefijo}: campos desconocidos ${desconocidos.join(", ")}. Los válidos son ${[...CAMPOS_JSON].join(", ")}`);
+    }
+    if (o.exento !== undefined && typeof o.exento !== "boolean")
+      throw new ValidationError(`${prefijo}: "exento" debe ser true o false, sin comillas`);
+    if (o.descripcion !== undefined && typeof o.descripcion !== "string")
+      throw new ValidationError(`${prefijo}: "descripcion" debe ser texto`);
+    const linea = {
+      nombre: limpiarNombre(String(o.nombre ?? ""), i, avisos),
+      cantidad: numeroEstricto(o.cantidad ?? 1, "la cantidad", prefijo),
+      precio: numeroEstricto(o.precio, "el precio", prefijo),
+      exento: o.exento === true
+    };
+    if (typeof o.descripcion === "string" && o.descripcion.trim())
+      linea.descripcion = o.descripcion.trim();
+    return linea;
+  }
+  const partes = t.split("|").map((p) => p.trim());
+  if (partes.length < 3 || partes.length > 4)
+    throw new ValidationError(`${prefijo}: "${texto2}" no tiene el formato esperado. ${FORMATO}`);
+  const [nombre, cantidad, precio, marca] = partes;
+  if (marca !== undefined && marca.toLowerCase() !== "exento") {
+    throw new ValidationError(`${prefijo}: el cuarto campo sólo puede ser "exento". ${FORMATO}`);
+  }
+  return {
+    nombre: limpiarNombre(nombre, i, avisos),
+    cantidad: numeroEstricto(cantidad, "la cantidad", prefijo),
+    precio: numeroEstricto(precio, "el precio", prefijo),
+    exento: marca !== undefined
+  };
+}
+
+// src/dte/partes.ts
+var MAX_GIRO_RECEPTOR = 40;
+var RECEPTOR_CONSUMIDOR_FINAL = {
+  RUTRecep: "66666666-6",
+  RznSocRecep: "Cliente",
+  DirRecep: "Sin direccion",
+  CmnaRecep: "Santiago"
+};
+var limpio = (v) => typeof v === "string" ? v.replace(/\s{2,}/g, " ").trim() : "";
+var NOMBRES = {
+  RznSoc: "la razón social del emisor",
+  RznSocEmisor: "la razón social del emisor",
+  GiroEmis: "el giro del emisor",
+  GiroEmisor: "el giro del emisor",
+  DirOrigen: "la dirección del emisor",
+  CmnaOrigen: "la comuna del emisor",
+  RznSocRecep: "la razón social del receptor",
+  DirRecep: "la dirección del receptor",
+  CmnaRecep: "la comuna del receptor"
+};
+function delSii(campo, valor, avisos) {
+  const limite2 = largoMaximo(campo);
+  if (limite2 === undefined || valor.length <= limite2)
+    return valor;
+  avisos.push(`El SII trae ${NOMBRES[campo] ?? campo} con ${valor.length} caracteres; se recortó a ${limite2}, que es lo que admite el formato del SII`);
+  return valor.slice(0, limite2).trim();
+}
+function actividades(ficha) {
+  return Array.isArray(ficha.actividades) ? ficha.actividades : [];
+}
+function principal(ficha) {
+  const lista2 = actividades(ficha).filter((a) => a.giro || a.codigoActividadEconomica);
+  return lista2.find((a) => a.actividadPrincipal) ?? lista2[0];
+}
+function emisorDesdeOrganizacion(org, esBoleta, acteco, avisos = []) {
+  const rut = limpio(org.rut);
+  const razon = delSii(esBoleta ? "RznSocEmisor" : "RznSoc", limpio(org.razonSocial), avisos);
+  const giro = delSii(esBoleta ? "GiroEmisor" : "GiroEmis", limpio(org.glosaDescriptiva) || limpio(principal(org)?.giro), avisos);
+  const dir = delSii("DirOrigen", limpio(org.direccion), avisos);
+  const comuna = delSii("CmnaOrigen", limpio(org.comuna), avisos);
+  const faltan = [!rut && "rut", !razon && "razón social", !giro && "giro", !dir && "dirección", !comuna && "comuna"].filter(Boolean);
+  if (faltan.length)
+    throw new ValidationError(`OpenFactura no devolvió estos datos del emisor: ${faltan.join(", ")}`);
+  const sucursal = limpio(org.cdgSIISucur);
+  if (esBoleta) {
+    return { RUTEmisor: rut, RznSocEmisor: razon, GiroEmisor: giro, DirOrigen: dir, CmnaOrigen: comuna, ...sucursal ? { CdgSIISucur: sucursal } : {} };
+  }
+  const codigo = acteco ?? Number(principal(org)?.codigoActividadEconomica);
+  if (!Number.isInteger(codigo) || codigo <= 0) {
+    throw new ValidationError("No se encontró la actividad económica del emisor. Pásala con --acteco <código>");
+  }
+  return { RUTEmisor: rut, RznSoc: razon, GiroEmis: giro, Acteco: codigo, DirOrigen: dir, CmnaOrigen: comuna, ...sucursal ? { CdgSIISucur: sucursal } : {} };
+}
+function receptorDesdeFicha(rut, ficha, manual, esBoleta, avisos) {
+  const encontrado = Boolean(ficha.razonSocial || ficha.direccion);
+  const razon = manual.razonSocial ?? delSii("RznSocRecep", limpio(ficha.razonSocial), avisos);
+  const direccion = manual.direccion ?? delSii("DirRecep", limpio(ficha.direccion), avisos);
+  const comuna = manual.comuna ?? delSii("CmnaRecep", limpio(ficha.comuna), avisos);
+  if (!razon) {
+    throw new ValidationError(encontrado ? `El SII no trae razón social para ${rut}. Pásala con --razon-social` : `El SII no conoce el RUT ${rut}. Revisa el RUT o pasa los datos a mano con --razon-social, --direccion y --comuna`);
+  }
+  const receptor = { RUTRecep: rut, RznSocRecep: razon };
+  if (!esBoleta) {
+    let giro = manual.giro ?? limpio(principal(ficha)?.giro);
+    if (!giro) {
+      throw new ValidationError(`${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. Si sabes que sí tiene giro, pásalo con --giro`);
+    }
+    if (giro.length > MAX_GIRO_RECEPTOR) {
+      avisos.push(`El giro del receptor se recortó a ${MAX_GIRO_RECEPTOR} caracteres, que es lo que admite el SII`);
+      giro = giro.slice(0, MAX_GIRO_RECEPTOR);
+    }
+    receptor.GiroRecep = giro;
+    if (manual.contacto)
+      receptor.Contacto = manual.contacto;
+  }
+  if (!direccion || !comuna)
+    throw new ValidationError(`Faltan la dirección o la comuna de ${razon}. Pásalas con --direccion y --comuna`);
+  receptor.DirRecep = direccion;
+  receptor.CmnaRecep = comuna;
+  if (manual.correo)
+    receptor.CorreoRecep = manual.correo;
+  return receptor;
+}
+
+// src/commands/emitir/referencias.ts
 function restarMeses(fechaIso, meses) {
   const [a, m, d] = fechaIso.split("-").map(Number);
   const total = a * 12 + (m - 1) - meses;
@@ -975,12 +1310,12 @@ async function referenciaNota(ctx, tipo, rutPropio) {
   if (codRef === 2 && !razonDada)
     throw new UsageError("--corrige-texto necesita --razon con la corrección");
   const razon = razonDada ?? (codRef === 1 ? "Anula documento" : "Corrige montos");
-  if (razon.length > MAX_RAZON_REF)
-    throw new ValidationError(`--razon tiene ${razon.length} caracteres y el máximo es ${MAX_RAZON_REF}`);
-  if (codRef === 2 && razon.length > MAX_NMB_ITEM) {
-    throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${MAX_NMB_ITEM} caracteres`);
+  if (razon.length > LARGOS.RazonRef)
+    throw new ValidationError(`--razon tiene ${razon.length} caracteres y el máximo es ${LARGOS.RazonRef}`);
+  if (codRef === 2 && razon.length > LARGOS.NmbItem) {
+    throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${LARGOS.NmbItem} caracteres`);
   }
-  const r = await ctx.client.get(`/document/${rutPropio}/${tipoRef}/${folio}/json`);
+  const r = await leerDocumento(ctx, rutPropio, tipoRef, folio);
   const original = r?.json;
   if (!original?.Encabezado)
     throw new ValidationError(`No se pudo leer el documento ${tipoRef} folio ${folio} para referenciarlo`);
@@ -995,6 +1330,15 @@ async function referenciaNota(ctx, tipo, rutPropio) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaOriginal))
     throw new ValidationError(`El documento ${tipoRef} folio ${folio} no trae fecha de emisión`);
   return { tipo: tipoRef, folio, codRef, razon, original, fecha: fechaOriginal };
+}
+async function leerDocumento(ctx, rutPropio, tipo, folio) {
+  try {
+    return await ctx.client.get(`/document/${rutPropio}/${tipo}/${folio}/json`);
+  } catch (e) {
+    if (!(e instanceof ApiError))
+      throw e;
+    throw new ApiError(`No se pudo leer el documento ${tipo} folio ${folio}: ${e.message}`, e.status, e.code, e.details);
+  }
 }
 function receptorDeNota(ctx, ref, email) {
   const original = { ...ref.original.Encabezado.Receptor ?? {} };
@@ -1029,7 +1373,7 @@ async function referenciasLibres(ctx, rutPropio) {
     if (!fechaRef) {
       if (!tributario)
         throw new UsageError(`--ref ${ref}: un documento tipo ${tipo} necesita la fecha, ej. ${tipo}:${folio}:AAAA-MM-DD`);
-      const r = await ctx.client.get(`/document/${rutPropio}/${tipo}/${folio}/json`);
+      const r = await leerDocumento(ctx, rutPropio, tipo, folio);
       fechaRef = r?.json?.Encabezado?.IdDoc?.FchEmis;
       if (!fechaRef)
         throw new ValidationError(`No se encontró el documento ${tipo} folio ${folio}. Pasa la fecha: ${tipo}:${folio}:AAAA-MM-DD`);
@@ -1039,13 +1383,14 @@ async function referenciasLibres(ctx, rutPropio) {
   return salida;
 }
 async function notasPrevias(ctx, ref, rutPropio, receptor, avisos) {
+  const suma2 = {};
+  const folios = [];
   try {
-    const suma2 = {};
-    const folios = [];
     const filtros = { TipoDTE: { eq: 61 }, FchEmis: { gte: ref.fecha } };
     const rutRecep = Number(normalizarRut(String(receptor.RUTRecep)).split("-")[0]);
     if (rutRecep !== 66666666)
       filtros.RUTRecep = { eq: rutRecep };
+    let ultima = 1;
     for (let pagina = 1;pagina <= MAX_PAGINAS_NOTAS; pagina++) {
       const r = await ctx.client.post("/document/issued", pagina > 1 ? { ...filtros, Page: pagina } : filtros);
       for (const d of r?.data ?? []) {
@@ -1053,22 +1398,36 @@ async function notasPrevias(ctx, ref, rutPropio, receptor, avisos) {
         const refs = nc?.json?.Referencia;
         const lista2 = Array.isArray(refs) ? refs : refs ? [refs] : [];
         const apunta = lista2.some((x) => String(x.TpoDocRef) === String(ref.tipo) && Number(x.FolioRef) === ref.folio && Number(x.CodRef) !== 2);
-        if (!apunta)
+        if (!apunta || folios.includes(`61:${d.Folio}`))
           continue;
         folios.push(`61:${d.Folio}`);
         const t = numeros(nc.json.Encabezado?.Totales ?? {});
         for (const k of ["MntNeto", "MntExe", "IVA", "MntTotal"])
           suma2[k] = (suma2[k] ?? 0) + (t[k] ?? 0);
       }
-      if (!r || pagina >= Number(r.last_page ?? pagina))
+      if (r?.last_page !== undefined && Number.isInteger(Number(r.last_page)))
+        ultima = Number(r.last_page);
+      if (!r || pagina >= ultima) {
+        if (pagina < ultima) {
+          avisos.push(`La página ${pagina} de ${ultima} de notas de crédito llegó vacía: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`);
+        }
         break;
+      }
+      if (pagina === MAX_PAGINAS_NOTAS) {
+        avisos.push(`Hay más de ${MAX_PAGINAS_NOTAS} páginas de notas de crédito desde la fecha del original y sólo se revisaron ${MAX_PAGINAS_NOTAS}: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`);
+      }
     }
     return { suma: suma2, folios };
   } catch (e) {
     avisos.push(`No se pudo revisar si ya hay otras notas de crédito contra este documento (${e.message}). Revísalo con: openfactura emitidos --tipo 61`);
-    return null;
+    return folios.length ? { suma: suma2, folios } : null;
   }
 }
+
+// src/commands/emitir/enviar.ts
+import { createHash } from "node:crypto";
+import { existsSync as existsSync2, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname, resolve } from "node:path";
 function validarAntesDeEmitir(ctx) {
   const clave = texto(ctx.flags, "idempotency-key");
   if (clave !== undefined && clave.trim() === "")
@@ -1149,7 +1508,7 @@ async function enviar(ctx, dte, extra, resumen, avisos) {
     throw e;
   }
   if (!r || typeof r !== "object" || Array.isArray(r) || typeof r.TOKEN !== "string") {
-    throw new ApiError("OpenFactura respondió algo que no es una emisión y no se sabe si el documento se emitió. Repite exactamente el mismo comando: la idempotencia evita emitirlo dos veces", 0, "RESPUESTA_INVALIDA", { idempotencyKey: key, fecha: dte.Encabezado?.IdDoc?.FchEmis });
+    throw new ApiError("OpenFactura respondió algo que no es una emisión y no se sabe si el documento se emitió. Repite exactamente el mismo comando: la idempotencia evita emitirlo dos veces", 0, "INVALID_RESPONSE", { idempotencyKey: key, fecha: dte.Encabezado?.IdDoc?.FchEmis });
   }
   const res = r;
   const salida = {
@@ -1171,7 +1530,7 @@ async function enviar(ctx, dte, extra, resumen, avisos) {
         writeFileSync2(pdf, bytes);
         salida.pdf = { archivo: pdf, bytes: bytes.length };
       } else {
-        avisos.push("El documento se emitió, pero el PDF no llegó bien. Pídelo con: openfactura documento pdf --token " + res.TOKEN);
+        avisos.push(`El documento se emitió, pero el PDF no llegó bien. Pídelo con: openfactura documento pdf --token ${res.TOKEN}`);
       }
     }
   } catch (e) {
@@ -1189,16 +1548,18 @@ async function enviar(ctx, dte, extra, resumen, avisos) {
 }
 async function esperarEstado(ctx, token, segundos) {
   const intervalo = texto(ctx.flags, "intervalo") !== undefined ? entero(texto(ctx.flags, "intervalo"), "--intervalo") : 10;
-  const limite = Date.now() + segundos * 1000;
+  const limite2 = Date.now() + segundos * 1000;
   let estado = "Sin estado";
   for (;; ) {
     const r = await ctx.client.get(`/document/${token}/status`);
     estado = String(r?.estado ?? estado);
-    if (!["Sin estado", "Pendiente"].includes(estado) || Date.now() >= limite)
+    if (!["Sin estado", "Pendiente"].includes(estado) || Date.now() >= limite2)
       return estado;
     await new Promise((res) => setTimeout(res, intervalo * 1000));
   }
 }
+
+// src/commands/emitir/tipo.ts
 async function emitirTipo(ctx, nombre) {
   const tipo = TIPOS[nombre];
   if (!tipo)
@@ -1215,9 +1576,12 @@ async function emitirTipo(ctx, nombre) {
   }
   if (tipo.nota && lista(ctx, "ref").length)
     throw new UsageError("En una nota el documento corregido va con --referencia, no con --ref");
+  if (tipo.boleta && lista(ctx, "ref").length) {
+    throw new UsageError("La boleta no lleva --ref: su esquema de referencias es otro. Si hace falta, arma el DTE y emítelo con: openfactura emitir archivo");
+  }
   const org = await ctx.client.get("/organization") ?? {};
   const acteco = texto(ctx.flags, "acteco");
-  const emisor = emisorDesdeOrganizacion(org, tipo.boleta, acteco ? entero(acteco, "--acteco") : undefined);
+  const emisor = emisorDesdeOrganizacion(org, tipo.boleta, acteco ? entero(acteco, "--acteco") : undefined, avisos);
   const rutPropio = normalizarRut(String(emisor.RUTEmisor));
   const ref = tipo.nota ? await referenciaNota(ctx, tipo, rutPropio) : undefined;
   const modo = ref ? TIPOS_EXENTOS.has(ref.tipo) ? "exento" : TIPOS_BOLETA.has(ref.tipo) ? "bruto" : "neto" : tipo.modo;
@@ -1263,7 +1627,7 @@ async function emitirTipo(ctx, nombre) {
   } else if (ref?.codRef === 2) {
     if (entrada.length)
       throw new UsageError("--corrige-texto no lleva --item: la corrección va en --razon");
-    det = [{ NroLinDet: 1, NmbItem: ref.razon, QtyItem: 1, PrcItem: 0, MontoItem: 0, ...modo === "exento" ? { IndExe: 1 } : {} }];
+    det = [{ NroLinDet: 1, NmbItem: ref.razon, QtyItem: 1, MontoItem: 0, ...modo === "exento" ? { IndExe: 1 } : {} }];
     totales = totalesDte({ MntNeto: 0, MntExe: 0, IVA: 0, MntTotal: 0 }, tipo, modo);
   } else {
     if (!ref && entrada.length && entrada.every((l) => l.exento) && (tipo.codigo === 33 || tipo.codigo === 39)) {
@@ -1371,7 +1735,7 @@ async function emitirTipo(ctx, nombre) {
       avisos.push("Es una guía de venta con monto cero: revisa los precios, o usa otro --traslado si no es venta");
   }
   encabezado.Totales = totales;
-  const dte = { Encabezado: encabezado, Detalle: det };
+  let dte = { Encabezado: encabezado, Detalle: det };
   if (ref) {
     dte.Referencia = [{ NroLinRef: 1, TpoDocRef: String(ref.tipo), FolioRef: ref.folio, FchRef: ref.fecha, CodRef: ref.codRef, RazonRef: ref.razon }];
   } else {
@@ -1379,6 +1743,8 @@ async function emitirTipo(ctx, nombre) {
     if (refs.length)
       dte.Referencia = refs;
   }
+  dte = ordenarDte(dte, tipo.boleta);
+  validarContraEsquema(dte, tipo.boleta);
   const resumen = {
     tipo: tipo.codigo,
     nombre,
@@ -1394,6 +1760,9 @@ async function emitirTipo(ctx, nombre) {
   };
   return enviar(ctx, dte, { correo: email }, resumen, avisos);
 }
+
+// src/commands/emitir/archivo.ts
+import { readFileSync } from "node:fs";
 async function emitirArchivo(ctx) {
   const ruta = arg(ctx, 1, "archivo.json");
   let contenido;
@@ -1421,6 +1790,8 @@ async function emitirArchivo(ctx) {
   const resumen = { tipo: Number(idDoc.TipoDTE), archivo: ruta, receptor: dte.Encabezado?.Receptor?.RznSocRecep, total: dte.Encabezado?.Totales?.MntTotal };
   return enviar(ctx, dte, { respuesta, correo: email ?? correoArchivo }, resumen, []);
 }
+
+// src/commands/emitir/index.ts
 var USO = `openfactura emitir <tipo> [opciones]
 openfactura emitir archivo <dte.json> [--confirmar]
 
@@ -1479,6 +1850,7 @@ Envío:
 var EMISION = [
   {
     nombre: "emitir",
+    minArgs: 1,
     maxArgs: 2,
     resumen: "Emite factura, boleta, notas, guía o un DTE desde archivo (en seco sin --confirmar)",
     uso: USO,
@@ -1584,7 +1956,7 @@ openfactura emitir factura --receptor 76.430.498-5 --item "Plan mensual|1|69000"
 openfactura emitir factura --receptor 76430498-5 --item "Plan anual|1|177310" --con-iva
 
 # Varias líneas y envío del documento por correo cuando el SII lo acepte
-openfactura emitir factura --receptor 76430498-5 --item "Producto|2|10000" --item "Despacho|1|3000" --correo pagos@cliente.cl
+openfactura emitir factura --receptor 76430498-5 --item "Producto|2|10000" --item "Despacho|1|3000" --correo pagos@example.com
 
 # Factura que cita la guía de despacho y la orden de compra del cliente
 openfactura emitir factura --receptor 76430498-5 --item "Producto|10|5000" --ref 52:123 --ref 801:OC-55:2026-09-01
@@ -1690,6 +2062,7 @@ openfactura recibidos --desde 2026-09-01 --todas
 
 openfactura ventas 2026-09                    # resumen del mes por tipo de documento
 openfactura compras 2026-09 --estado pendiente
+openfactura sincronizar-rcv ventas 2026-09   # pide a OpenFactura traer el RCV del SII, si ventas o compras vienen atrasados
 openfactura contribuyente 76.430.498-5        # ficha SII de un RUT
 openfactura folios                            # tipos de documento autorizados
 \`\`\`
@@ -1710,7 +2083,7 @@ OpenFactura trae más documentos, alguien emitió por fuera.
 | \`OF-429\` | Límite propio de \`sincronizar-rcv\` | Espera los segundos de \`retry_after\` |
 | \`VALIDATION\` | El CLI detectó un problema antes de enviar | Lee el mensaje: dice qué corregir |
 | \`TIMEOUT\` al emitir | OpenFactura no respondió a tiempo, pero el documento pudo emitirse | Repite **exactamente** el mismo comando el mismo día: si ya se emitió, vuelve como \`yaEmitido\` |
-| \`RESPUESTA_INVALIDA\` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
+| \`INVALID_RESPONSE\` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
 
 ## Lo que la API no permite
 
@@ -1765,7 +2138,7 @@ var SKILLS = [
 var COMANDOS = [...LECTURAS, ...EMISION, ...SKILLS];
 
 // src/version.ts
-var VERSION = "0.1.0";
+var VERSION = "0.2.0";
 
 // src/cli.ts
 var FLAGS_GLOBALES = {
@@ -1789,8 +2162,8 @@ function ayudaGeneral() {
     "  --api-key <clave>  API key (o variable OPENFACTURA_API_KEY)",
     "  --dev              Usa el ambiente de pruebas dev-api.haulmer.com (o OPENFACTURA_ENV=dev)",
     "  --timeout <ms>     Tiempo máximo por llamada (default 60000)",
-    "  -h, --help         Ayuda general o de un comando",
-    "  --version          Versión",
+    "  -h, --help         Ayuda general o de un comando (también: openfactura help <comando>)",
+    "  -v, --version      Versión",
     "",
     "La salida es JSON en stdout. Los errores salen como JSON en stderr, con código 1 si los",
     "rechazó OpenFactura y 2 si el problema está en los argumentos o la configuración."
@@ -1810,12 +2183,24 @@ function buscarComando(posicionales) {
   }
   return null;
 }
+function opcionInvalida(mensaje, code) {
+  const opcion2 = /'(?:-\w, )?(--?[\w-]+)/.exec(mensaje)?.[1];
+  if (!opcion2)
+    return mensaje;
+  if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION")
+    return `La opción ${opcion2} no existe`;
+  if (/does not take an argument/.test(mensaje))
+    return `${opcion2} no lleva valor`;
+  if (/argument missing|argument is ambiguous/.test(mensaje))
+    return `${opcion2} necesita un valor`;
+  return mensaje;
+}
 function error(io, cuerpo, codigo) {
   io.err(JSON.stringify(cuerpo, null, 2));
   return codigo;
 }
 async function run(argv, env, io) {
-  if (argv[0] === "--version") {
+  if (argv[0] === "--version" || argv[0] === "-v") {
     io.out(VERSION);
     return 0;
   }
@@ -1825,6 +2210,10 @@ async function run(argv, env, io) {
     const a = argv[i];
     const nombre = a.replace(/^--?/, "").split("=")[0];
     const conValor = nombre === "api-key" || nombre === "timeout";
+    if (nombre === "v" || nombre === "version") {
+      io.out(VERSION);
+      return 0;
+    }
     if (!(nombre in FLAGS_GLOBALES) && nombre !== "h") {
       return error(io, { error: `Opción desconocida antes del comando: ${a}. Mira openfactura --help`, code: "USAGE" }, 2);
     }
@@ -1839,6 +2228,13 @@ async function run(argv, env, io) {
     i++;
   }
   argv = argv.slice(i);
+  if (argv[0] === "help") {
+    if (argv.length === 1) {
+      io.out(ayudaGeneral());
+      return 0;
+    }
+    argv = [...argv.slice(1), "--help"];
+  }
   if (argv.length === 0) {
     io.out(ayudaGeneral());
     return 0;
@@ -1866,14 +2262,17 @@ async function run(argv, env, io) {
     if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0 || timeout > 2147483647)) {
       throw new UsageError("--timeout debe ser un número de milisegundos, de 1 a 2147483647");
     }
+    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
+      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
+    }
+    if (comando.minArgs !== undefined && positionals.length < comando.minArgs) {
+      throw new UsageError(`Faltan argumentos. Uso: ${comando.uso}`);
+    }
     let config = undefined;
     let client = undefined;
     if (!comando.sinClave) {
       config = resolveConfig({ apiKey: values["api-key"], dev: values.dev, timeoutMs: timeout }, env);
       client = new OpenFacturaClient(config);
-    }
-    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
-      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
     }
     const resultado = await comando.run({ client, config, flags: values, args: positionals, io, env });
     if (resultado !== undefined)
@@ -1888,11 +2287,14 @@ async function run(argv, env, io) {
       return error(io, { error: e.message, code: e.code }, 2);
     const sistema = e;
     if (sistema.syscall) {
-      return error(io, { error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`, code: "ARCHIVO" }, 2);
+      return error(io, {
+        error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`,
+        code: "FILE"
+      }, 2);
     }
     const nodeCode = sistema.code;
     if (typeof nodeCode === "string" && nodeCode.startsWith("ERR_PARSE_ARGS")) {
-      return error(io, { error: e.message, code: "USAGE" }, 2);
+      return error(io, { error: `${opcionInvalida(e.message, nodeCode)}. Mira openfactura ${comando.nombre} --help`, code: "USAGE" }, 2);
     }
     return error(io, { error: String(e?.message ?? e), code: "INTERNAL" }, 1);
   }
@@ -1900,9 +2302,9 @@ async function run(argv, env, io) {
 
 // src/main.ts
 var codigo = await run(process.argv.slice(2), process.env, {
-  out: (s) => process.stdout.write(s + `
+  out: (s) => process.stdout.write(`${s}
 `),
-  err: (s) => process.stderr.write(s + `
+  err: (s) => process.stderr.write(`${s}
 `)
 });
 process.exitCode = codigo;

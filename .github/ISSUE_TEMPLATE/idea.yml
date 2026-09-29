@@ -1,0 +1,16 @@
+name: Idea o pedido
+description: Un comando, una opción o un tipo de documento que falta
+labels: [enhancement]
+body:
+  - type: textarea
+    id: caso
+    attributes:
+      label: Qué necesitas hacer
+      description: El caso real, no la solución. Por ejemplo, "emitir facturas con descuento global".
+    validations:
+      required: true
+  - type: textarea
+    id: norma
+    attributes:
+      label: Norma o documentación
+      description: Si depende de una regla del SII o de un endpoint de OpenFactura, el enlace

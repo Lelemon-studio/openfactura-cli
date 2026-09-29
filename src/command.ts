@@ -24,6 +24,7 @@ export interface Comando {
   uso: string;
   flags?: NonNullable<ParseArgsConfig["options"]>;
   sinClave?: boolean;
+  minArgs?: number;
   maxArgs?: number;
   run: (ctx: Contexto) => unknown;
 }
@@ -57,4 +58,9 @@ export function arg(ctx: Contexto, i: number, nombre: string): string {
   const v = ctx.args[i];
   if (v === undefined) throw new UsageError(`Falta el argumento <${nombre}>`);
   return v;
+}
+
+export function entero(valor: string | undefined, nombre: string): number {
+  if (valor === undefined || !/^\d+$/.test(valor.trim())) throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
+  return Number(valor);
 }

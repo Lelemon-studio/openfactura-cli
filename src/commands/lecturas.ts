@@ -1,23 +1,16 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { ApiError } from "../client.ts";
-import { type Comando, type Contexto, type Flags, UsageError, arg, requerido, texto } from "../command.ts";
+import { type Comando, type Contexto, type Flags, UsageError, arg, entero, requerido, texto } from "../command.ts";
 import { fecha, periodo, rutaPeriodo } from "../fechas.ts";
 import { normalizarRut, rutCuerpo } from "../rut.ts";
 
-const PAUSA_ENTRE_PAGINAS_MS = 350;
 const MAX_PAGINAS = 500;
-const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-export function entero(valor: string | undefined, nombre: string): number {
-  if (valor === undefined || !/^\d+$/.test(valor.trim())) throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
-  return Number(valor);
-}
 
 export async function rutEmisor(ctx: Contexto): Promise<string> {
   const dado = texto(ctx.flags, "rut");
   if (dado) return normalizarRut(dado);
   const org = (await ctx.client.get("/organization")) as { rut?: string } | null;
-  if (!org?.rut) throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "SIN_EMISOR");
+  if (!org?.rut) throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "NO_ISSUER");
   return normalizarRut(org.rut);
 }
 
@@ -59,29 +52,53 @@ async function listar(ctx: Contexto, ruta: string, filtros: Record<string, unkno
   if (pagina < 1) throw new UsageError("--pagina parte en 1");
   if (folio !== undefined && texto(ctx.flags, "pagina")) throw new UsageError("--folio recorre todas las páginas: no se combina con --pagina");
   const documentos: Array<Record<string, unknown>> = [];
+  const avisos: string[] = [];
+  const primera = pagina;
   let ultima = 0;
   let total = 0;
+  let errorPagina: { code: string; status: number } | undefined;
 
   for (;;) {
     const body = pagina > 1 ? { ...filtros, Page: pagina } : filtros;
-    const r = (await ctx.client.post(ruta, body)) as Pagina | null;
-    if (!r) break;
+    let r: Pagina | null;
+    try {
+      r = (await ctx.client.post(ruta, body)) as Pagina | null;
+    } catch (e) {
+      if (pagina === primera) throw e;
+      if (e instanceof ApiError) errorPagina = { code: e.code, status: e.status };
+      avisos.push(`El listado quedó incompleto: falló la página ${pagina} de ${ultima} (${(e as Error).message}). Lo de arriba es lo que alcanzó a bajar.`);
+      break;
+    }
+    if (!r) {
+      if (pagina > primera && pagina <= ultima)
+        avisos.push(`El listado quedó incompleto: la página ${pagina} de ${ultima} llegó vacía. Lo de arriba es lo que alcanzó a bajar.`);
+      break;
+    }
     documentos.push(...(r.data ?? []));
-    const ultimaInformada = Number(r.last_page ?? pagina);
-    ultima = Number.isInteger(ultimaInformada) && ultimaInformada >= 0 ? ultimaInformada : pagina;
-    const totalInformado = Number(r.total ?? documentos.length);
-    total = Number.isFinite(totalInformado) ? totalInformado : documentos.length;
-    if (!todas || pagina >= ultima || pagina >= MAX_PAGINAS) break;
+    const ultimaInformada = Number(r.last_page);
+    if (r.last_page !== undefined && Number.isInteger(ultimaInformada) && ultimaInformada >= 0) ultima = ultimaInformada;
+    else ultima = Math.max(ultima, pagina);
+    const totalInformado = Number(r.total);
+    if (r.total !== undefined && Number.isFinite(totalInformado)) total = totalInformado;
+    else total = Math.max(total, documentos.length);
+    if (!todas || pagina >= ultima) break;
+    if (pagina - primera + 1 >= MAX_PAGINAS) {
+      avisos.push(
+        `El listado quedó incompleto: se bajaron ${MAX_PAGINAS} páginas y quedan hasta la ${ultima}. Acota con --desde y --hasta, o sigue con --pagina ${pagina + 1}.`,
+      );
+      break;
+    }
     pagina++;
-    await esperar(PAUSA_ENTRE_PAGINAS_MS);
   }
 
+  const extra = avisos.length ? { incompleto: true, avisos, ...(errorPagina ? { errorPagina } : {}) } : {};
   if (folio !== undefined) {
     const buscado = entero(folio, "--folio");
     const filtrados = documentos.filter((d) => Number(d.Folio) === buscado);
-    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados };
+    if (avisos.length && !filtrados.length) avisos.push(`El folio ${buscado} no apareció, pero no se revisaron todas las páginas: puede existir igual.`);
+    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados, ...extra };
   }
-  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos };
+  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos, ...extra };
 }
 
 const FLAGS_LISTA = {
@@ -140,11 +157,11 @@ async function documento(ctx: Contexto) {
 
   const campo = accion === "xml" ? "xml" : "pdf";
   const b64 = r?.[campo];
-  if (typeof b64 !== "string" || b64 === "") throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "SIN_ARCHIVO");
-  if (!/^[A-Za-z0-9+/\s]+={0,2}\s*$/.test(b64)) throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "ARCHIVO_INVALIDO");
+  if (typeof b64 !== "string" || b64 === "") throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "NO_FILE");
+  if (!/^[A-Za-z0-9+/\s]+={0,2}\s*$/.test(b64)) throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "INVALID_FILE");
   const bytes = Buffer.from(b64, "base64");
   if (campo === "pdf" && bytes.subarray(0, 4).toString("latin1") !== "%PDF") {
-    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "PDF_INVALIDO");
+    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "INVALID_PDF");
   }
   const sufijo = accion === "cedible" ? "_cedible.pdf" : accion === "xml" ? ".xml" : ".pdf";
   return guardarArchivo(texto(ctx.flags, "salida") ?? `${nombreBase}${sufijo}`, bytes, Boolean(ctx.flags.sobrescribir));
@@ -171,7 +188,7 @@ export const LECTURAS: Comando[] = [
   {
     nombre: "folios",
     maxArgs: 0,
-    resumen: "Tipos de documento autorizados y folios disponibles",
+    resumen: "Tipos de documento autorizados (el contador de folios no es confiable)",
     uso: [
       "openfactura folios",
       "",
@@ -182,6 +199,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "contribuyente",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Ficha del SII de cualquier RUT: razón social, giro, dirección y sucursales",
     uso: [
@@ -195,7 +213,7 @@ export const LECTURAS: Comando[] = [
       const rut = normalizarRut(arg(ctx, 0, "rut"));
       const crudo = await ctx.client.get(`/taxpayer/${rut}`);
       if (crudo !== null && (typeof crudo !== "object" || Array.isArray(crudo))) {
-        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "RESPUESTA_INVALIDA");
+        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "INVALID_RESPONSE");
       }
       const r = (crudo ?? {}) as Record<string, unknown>;
       const actividades = Array.isArray(r.actividades) ? (r.actividades as Array<Record<string, unknown>>) : [];
@@ -206,6 +224,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "documento",
+    minArgs: 1,
     maxArgs: 3,
     resumen: "Estado ante el SII, JSON, XML, PDF o copia cedible de un documento",
     uso: [
@@ -282,6 +301,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "acusar",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Acepta o reclama un documento recibido ante el SII (pide --confirmar)",
     uso: [
@@ -302,13 +322,12 @@ export const LECTURAS: Comando[] = [
         rut: normalizarRut(requerido(ctx.flags, "rut-emisor")),
         acuse,
       };
-      return enSeco(ctx, "acusar documento recibido", "POST /document/received/accuse", body, () =>
-        ctx.client.post("/document/received/accuse", body),
-      );
+      return enSeco(ctx, "acusar documento recibido", "POST /document/received/accuse", body, () => ctx.client.post("/document/received/accuse", body));
     },
   },
   {
     nombre: "ventas",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de ventas de un mes o un día, por tipo de documento",
     uso: "openfactura ventas <AAAA-MM | AAAA-MM-DD>",
@@ -316,11 +335,10 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "compras",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de compras de un mes o un día, separado por estado",
-    uso: [
-      "openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]",
-    ].join("\n"),
+    uso: ["openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]"].join("\n"),
     flags: { estado: { type: "string" } },
     run: (ctx) => {
       let ruta = `/registry/purchase/${rutaPeriodo(periodo(arg(ctx, 0, "período")))}`;
@@ -338,6 +356,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "sincronizar-rcv",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Pide a OpenFactura traer del SII el registro de compras o ventas de un mes",
     uso: [
@@ -356,6 +375,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "anular-guia",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Anula una guía de despacho (52) ante el SII (pide --confirmar)",
     uso: [

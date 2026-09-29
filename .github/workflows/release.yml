@@ -1,0 +1,44 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: el tag es la versión de package.json
+        run: |
+          version=$(bun -e 'console.log(require("./package.json").version)')
+          test "$GITHUB_REF_NAME" = "v$version" || { echo "El tag $GITHUB_REF_NAME no coincide con package.json ($version)"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "CHANGELOG.md no tiene la sección [$version]"; exit 1; }
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun test --timeout 5000
+      - name: el build versionado es el del tag
+        run: |
+          bun run build:node
+          git diff --exit-code dist/cli.js
+      - name: empaquetar
+        run: |
+          npm pack --ignore-scripts
+          sha256sum openfactura-cli-*.tgz > SHA256SUMS
+      - name: publicar el release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v h="## [$version]" 'index($0, h) == 1 {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notas.md
+          test -s notas.md
+          gh release create "$GITHUB_REF_NAME" openfactura-cli-*.tgz SHA256SUMS --title "$GITHUB_REF_NAME" --notes-file notas.md --verify-tag

@@ -47,7 +47,7 @@ openfactura emitir factura --receptor 76.430.498-5 --item "Plan mensual|1|69000"
 openfactura emitir factura --receptor 76430498-5 --item "Plan anual|1|177310" --con-iva
 
 # Varias líneas y envío del documento por correo cuando el SII lo acepte
-openfactura emitir factura --receptor 76430498-5 --item "Producto|2|10000" --item "Despacho|1|3000" --correo pagos@cliente.cl
+openfactura emitir factura --receptor 76430498-5 --item "Producto|2|10000" --item "Despacho|1|3000" --correo pagos@example.com
 
 # Factura que cita la guía de despacho y la orden de compra del cliente
 openfactura emitir factura --receptor 76430498-5 --item "Producto|10|5000" --ref 52:123 --ref 801:OC-55:2026-09-01
@@ -153,6 +153,7 @@ openfactura recibidos --desde 2026-09-01 --todas
 
 openfactura ventas 2026-09                    # resumen del mes por tipo de documento
 openfactura compras 2026-09 --estado pendiente
+openfactura sincronizar-rcv ventas 2026-09   # pide a OpenFactura traer el RCV del SII, si ventas o compras vienen atrasados
 openfactura contribuyente 76.430.498-5        # ficha SII de un RUT
 openfactura folios                            # tipos de documento autorizados
 ```
@@ -173,7 +174,7 @@ OpenFactura trae más documentos, alguien emitió por fuera.
 | `OF-429` | Límite propio de `sincronizar-rcv` | Espera los segundos de `retry_after` |
 | `VALIDATION` | El CLI detectó un problema antes de enviar | Lee el mensaje: dice qué corregir |
 | `TIMEOUT` al emitir | OpenFactura no respondió a tiempo, pero el documento pudo emitirse | Repite **exactamente** el mismo comando el mismo día: si ya se emitió, vuelve como `yaEmitido` |
-| `RESPUESTA_INVALIDA` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
+| `INVALID_RESPONSE` | OpenFactura respondió algo que no es una emisión | Igual que el timeout: repite el mismo comando |
 
 ## Lo que la API no permite
 

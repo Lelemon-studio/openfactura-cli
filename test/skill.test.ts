@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { run } from "../src/cli.ts";
 
 const dirs: string[] = [];
-afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
 
 async function ejecutar(argv: string[], env: Record<string, string> = {}) {
   const out: string[] = [];

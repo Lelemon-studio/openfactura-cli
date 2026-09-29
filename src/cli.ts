@@ -27,8 +27,8 @@ function ayudaGeneral(): string {
     "  --api-key <clave>  API key (o variable OPENFACTURA_API_KEY)",
     "  --dev              Usa el ambiente de pruebas dev-api.haulmer.com (o OPENFACTURA_ENV=dev)",
     "  --timeout <ms>     Tiempo máximo por llamada (default 60000)",
-    "  -h, --help         Ayuda general o de un comando",
-    "  --version          Versión",
+    "  -h, --help         Ayuda general o de un comando (también: openfactura help <comando>)",
+    "  -v, --version      Versión",
     "",
     "La salida es JSON en stdout. Los errores salen como JSON en stderr, con código 1 si los",
     "rechazó OpenFactura y 2 si el problema está en los argumentos o la configuración.",
@@ -48,13 +48,22 @@ function buscarComando(posicionales: string[]): { comando: Comando; resto: strin
   return null;
 }
 
+function opcionInvalida(mensaje: string, code: string): string {
+  const opcion = /'(?:-\w, )?(--?[\w-]+)/.exec(mensaje)?.[1];
+  if (!opcion) return mensaje;
+  if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") return `La opción ${opcion} no existe`;
+  if (/does not take an argument/.test(mensaje)) return `${opcion} no lleva valor`;
+  if (/argument missing|argument is ambiguous/.test(mensaje)) return `${opcion} necesita un valor`;
+  return mensaje;
+}
+
 function error(io: IO, cuerpo: Record<string, unknown>, codigo: number): number {
   io.err(JSON.stringify(cuerpo, null, 2));
   return codigo;
 }
 
 export async function run(argv: string[], env: Record<string, string | undefined>, io: IO): Promise<number> {
-  if (argv[0] === "--version") {
+  if (argv[0] === "--version" || argv[0] === "-v") {
     io.out(VERSION);
     return 0;
   }
@@ -65,6 +74,10 @@ export async function run(argv: string[], env: Record<string, string | undefined
     const a = argv[i]!;
     const nombre = a.replace(/^--?/, "").split("=")[0]!;
     const conValor = nombre === "api-key" || nombre === "timeout";
+    if (nombre === "v" || nombre === "version") {
+      io.out(VERSION);
+      return 0;
+    }
     if (!(nombre in FLAGS_GLOBALES) && nombre !== "h") {
       return error(io, { error: `Opción desconocida antes del comando: ${a}. Mira openfactura --help`, code: "USAGE" }, 2);
     }
@@ -79,6 +92,13 @@ export async function run(argv: string[], env: Record<string, string | undefined
   }
   argv = argv.slice(i);
 
+  if (argv[0] === "help") {
+    if (argv.length === 1) {
+      io.out(ayudaGeneral());
+      return 0;
+    }
+    argv = [...argv.slice(1), "--help"];
+  }
   if (argv.length === 0) {
     io.out(ayudaGeneral());
     return 0;
@@ -108,14 +128,17 @@ export async function run(argv: string[], env: Record<string, string | undefined
     if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0 || timeout > 2_147_483_647)) {
       throw new UsageError("--timeout debe ser un número de milisegundos, de 1 a 2147483647");
     }
+    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
+      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
+    }
+    if (comando.minArgs !== undefined && positionals.length < comando.minArgs) {
+      throw new UsageError(`Faltan argumentos. Uso: ${comando.uso}`);
+    }
     let config = undefined as unknown as Config;
     let client = undefined as unknown as OpenFacturaClient;
     if (!comando.sinClave) {
       config = resolveConfig({ apiKey: values["api-key"] as string | undefined, dev: values.dev as boolean | undefined, timeoutMs: timeout }, env);
       client = new OpenFacturaClient(config);
-    }
-    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
-      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
     }
     const resultado = await comando.run({ client, config, flags: values, args: positionals, io, env });
     if (resultado !== undefined) io.out(JSON.stringify(resultado, null, 2));
@@ -126,11 +149,18 @@ export async function run(argv: string[], env: Record<string, string | undefined
     if (e instanceof UsageError || e instanceof ConfigError) return error(io, { error: e.message, code: e.code }, 2);
     const sistema = e as { code?: string; syscall?: string; path?: string };
     if (sistema.syscall) {
-      return error(io, { error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`, code: "ARCHIVO" }, 2);
+      return error(
+        io,
+        {
+          error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`,
+          code: "FILE",
+        },
+        2,
+      );
     }
     const nodeCode = sistema.code;
     if (typeof nodeCode === "string" && nodeCode.startsWith("ERR_PARSE_ARGS")) {
-      return error(io, { error: (e as Error).message, code: "USAGE" }, 2);
+      return error(io, { error: `${opcionInvalida((e as Error).message, nodeCode)}. Mira openfactura ${comando.nombre} --help`, code: "USAGE" }, 2);
     }
     return error(io, { error: String((e as Error)?.message ?? e), code: "INTERNAL" }, 1);
   }

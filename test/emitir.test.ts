@@ -28,12 +28,14 @@ const HOSTY = {
   razonSocial: "HOSTY SPA",
   direccion: "ARTURO PRAT 527",
   comuna: "Curicó",
-  actividades: [{ giro: "ACTIVIDADES DE CONSULTORIA DE INFORMATICA Y DE GESTION DE INSTALACIONES", codigoActividadEconomica: "620200", actividadPrincipal: true }],
+  actividades: [
+    { giro: "ACTIVIDADES DE CONSULTORIA DE INFORMATICA Y DE GESTION DE INSTALACIONES", codigoActividadEconomica: "620200", actividadPrincipal: true },
+  ],
 };
 const SIN_GIRO = { rut: "11111111-1", razonSocial: "PERSONA NATURAL", direccion: "CALLE 1", comuna: "Santiago", actividades: [{ giro: null }] };
 
 function responde(ruta: string, ...rs: Array<{ status: number; body: unknown }>) {
-  (rutas[ruta] ??= []).push(...rs);
+  rutas[ruta] = [...(rutas[ruta] ?? []), ...rs];
 }
 
 beforeEach(() => {
@@ -46,9 +48,15 @@ beforeEach(() => {
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const ruta = String(url).replace(BASE, "");
     const metodo = init?.method ?? "GET";
-    llamadas.push({ url: ruta, method: metodo, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers: (init?.headers ?? {}) as Record<string, string> });
+    llamadas.push({
+      url: ruta,
+      method: metodo,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      headers: (init?.headers ?? {}) as Record<string, string>,
+    });
     const cola = rutas[`${metodo} ${ruta}`];
-    const r = cola && cola.length > 1 ? cola.shift()! : cola?.[0] ?? { status: 404, body: { error: { message: `sin mock para ${metodo} ${ruta}`, code: "TEST" } } };
+    const r =
+      cola && cola.length > 1 ? cola.shift()! : (cola?.[0] ?? { status: 404, body: { error: { message: `sin mock para ${metodo} ${ruta}`, code: "TEST" } } });
     return new Response(r.body == null ? null : JSON.stringify(r.body), { status: r.status });
   }) as typeof fetch;
 });
@@ -61,7 +69,7 @@ afterEach(() => {
 async function ejecutar(...argv: string[]) {
   const out: string[] = [];
   const err: string[] = [];
-  const codigo = await run(argv, { OPENFACTURA_API_KEY: "k" }, { out: (s) => out.push(s), err: (s) => err.push(s) });
+  const codigo = await run(argv, { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "0" }, { out: (s) => out.push(s), err: (s) => err.push(s) });
   return { codigo, out: out.length ? JSON.parse(out.join("")) : undefined, err: err.length ? JSON.parse(err.join("")) : undefined };
 }
 
@@ -138,20 +146,34 @@ describe("factura", () => {
   });
 
   test("los datos del receptor se pueden reemplazar a mano", async () => {
-    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--giro", "SERVICIOS", "--direccion", "OTRA 1", "--comuna", "Talca", "--item", "x|1|1000", ...FECHA);
+    const r = await ejecutar(
+      "emitir",
+      "factura",
+      "--receptor",
+      "76430498-5",
+      "--giro",
+      "SERVICIOS",
+      "--direccion",
+      "OTRA 1",
+      "--comuna",
+      "Talca",
+      "--item",
+      "x|1|1000",
+      ...FECHA,
+    );
     expect(r.out.dte.Encabezado.Receptor).toMatchObject({ GiroRecep: "SERVICIOS", DirRecep: "OTRA 1", CmnaRecep: "Talca" });
   });
 
   test("--correo agrega CorreoRecep y el envío por correo tras la aceptación", async () => {
     responde("POST /document", { status: 200, body: { TOKEN: "t", FOLIO: 2 } });
-    await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos@hosty.cl", ...FECHA, "--confirmar");
+    await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos@example.com", ...FECHA, "--confirmar");
     const e = emisiones()[0]!;
-    expect(e.body.dte.Encabezado.Receptor.CorreoRecep).toBe("pagos@hosty.cl");
-    expect(e.body.sendEmail).toEqual({ to: "pagos@hosty.cl" });
+    expect(e.body.dte.Encabezado.Receptor.CorreoRecep).toBe("pagos@example.com");
+    expect(e.body.sendEmail).toEqual({ to: "pagos@example.com" });
   });
 
   test("un correo mal escrito falla", async () => {
-    expect((await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos-hosty.cl", ...FECHA)).codigo).toBe(2);
+    expect((await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos-example.com", ...FECHA)).codigo).toBe(2);
   });
 
   test("--con-iva desglosa el precio bruto", async () => {
@@ -160,7 +182,17 @@ describe("factura", () => {
   });
 
   test("el ítem acepta JSON con descripción y exento", async () => {
-    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", '{"nombre":"Envío","cantidad":2,"precio":500,"exento":true,"descripcion":"Despacho"}', "--item", "Producto|1|1000", ...FECHA);
+    const r = await ejecutar(
+      "emitir",
+      "factura",
+      "--receptor",
+      "76430498-5",
+      "--item",
+      '{"nombre":"Envío","cantidad":2,"precio":500,"exento":true,"descripcion":"Despacho"}',
+      "--item",
+      "Producto|1|1000",
+      ...FECHA,
+    );
     expect(r.out.dte.Detalle[0]).toEqual({ NroLinDet: 1, NmbItem: "Envío", DscItem: "Despacho", QtyItem: 2, PrcItem: 500, MontoItem: 1000, IndExe: 1 });
     expect(r.out.dte.Encabezado.Totales).toEqual({ MntNeto: 1000, MntExe: 1000, TasaIVA: 19, IVA: 190, MntTotal: 2190 });
   });
@@ -198,7 +230,20 @@ describe("factura", () => {
   test("--esperar consulta el estado hasta que el SII responde", async () => {
     responde("POST /document", { status: 200, body: { TOKEN: "tok", FOLIO: 5 } });
     responde("GET /document/tok/status", { status: 200, body: { estado: "Sin estado" } }, { status: 200, body: { estado: "Aceptado" } });
-    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", ...FECHA, "--confirmar", "--esperar", "5", "--intervalo", "1");
+    const r = await ejecutar(
+      "emitir",
+      "factura",
+      "--receptor",
+      "76430498-5",
+      "--item",
+      "x|1|1000",
+      ...FECHA,
+      "--confirmar",
+      "--esperar",
+      "5",
+      "--intervalo",
+      "1",
+    );
     expect(r.out.estado).toBe("Aceptado");
   });
 
@@ -273,7 +318,18 @@ describe("nota de crédito", () => {
   beforeEach(() => responde("GET /document/76795561-8/33/30/json", { status: 200, body: FACTURA_30 }));
 
   test("corrige montos: toma receptor y fecha del documento original", async () => {
-    const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--razon", "Descuento 50%", "--item", "Descuento|1|74500", ...FECHA);
+    const r = await ejecutar(
+      "emitir",
+      "nota-credito",
+      "--referencia",
+      "33:30",
+      "--corrige-montos",
+      "--razon",
+      "Descuento 50%",
+      "--item",
+      "Descuento|1|74500",
+      ...FECHA,
+    );
     expect(r.codigo).toBe(0);
     expect(r.out.dte.Encabezado.IdDoc.TipoDTE).toBe(61);
     expect(r.out.dte.Encabezado.Receptor).toEqual(FACTURA_30.json.Encabezado.Receptor);
@@ -296,7 +352,7 @@ describe("nota de crédito", () => {
 
   test("corrige texto: montos en cero y la corrección en el detalle", async () => {
     const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-texto", "--razon", "Corrige giro del receptor", ...FECHA);
-    expect(r.out.dte.Detalle).toEqual([{ NroLinDet: 1, NmbItem: "Corrige giro del receptor", QtyItem: 1, PrcItem: 0, MontoItem: 0 }]);
+    expect(r.out.dte.Detalle).toEqual([{ NroLinDet: 1, NmbItem: "Corrige giro del receptor", QtyItem: 1, MontoItem: 0 }]);
     expect(r.out.dte.Encabezado.Totales).toEqual({ MntNeto: 0, TasaIVA: 19, IVA: 0, MntTotal: 0 });
     expect(r.out.dte.Referencia[0].CodRef).toBe(2);
   });
@@ -318,7 +374,16 @@ describe("nota de crédito", () => {
   test("nota de crédito sobre boleta referencia la 39 y toma el receptor de la boleta", async () => {
     responde("GET /document/76795561-8/39/1004/json", {
       status: 200,
-      body: { json: { Encabezado: { IdDoc: { TipoDTE: 39, FchEmis: "2026-09-17" }, Receptor: { RUTRecep: "66666666-6", RznSocRecep: "Cliente" }, Totales: { MntNeto: 40951, IVA: 7781, MntTotal: 48732 } }, Detalle: [] } },
+      body: {
+        json: {
+          Encabezado: {
+            IdDoc: { TipoDTE: 39, FchEmis: "2026-09-17" },
+            Receptor: { RUTRecep: "66666666-6", RznSocRecep: "Cliente" },
+            Totales: { MntNeto: 40951, IVA: 7781, MntTotal: 48732 },
+          },
+          Detalle: [],
+        },
+      },
     });
     const r = await ejecutar("emitir", "nota-credito", "--referencia", "39:1004", "--corrige-montos", "--item", "Devolución|1|10000", ...FECHA);
     expect(r.out.dte.Referencia[0]).toMatchObject({ TpoDocRef: "39", FolioRef: 1004 });
@@ -328,7 +393,18 @@ describe("nota de crédito", () => {
 describe("nota de débito", () => {
   test("lleva TipoDTE 56 y referencia", async () => {
     responde("GET /document/76795561-8/33/30/json", { status: 200, body: FACTURA_30 });
-    const r = await ejecutar("emitir", "nota-debito", "--referencia", "33:30", "--corrige-montos", "--razon", "Intereses", "--item", "Intereses|1|5000", ...FECHA);
+    const r = await ejecutar(
+      "emitir",
+      "nota-debito",
+      "--referencia",
+      "33:30",
+      "--corrige-montos",
+      "--razon",
+      "Intereses",
+      "--item",
+      "Intereses|1|5000",
+      ...FECHA,
+    );
     expect(r.out.dte.Encabezado.IdDoc.TipoDTE).toBe(56);
     expect(r.out.dte.Referencia[0].CodRef).toBe(3);
   });
@@ -340,7 +416,23 @@ describe("guía de despacho", () => {
   });
 
   test("lleva IndTraslado, despacho y destino", async () => {
-    const r = await ejecutar("emitir", "guia", "--receptor", "76430498-5", "--item", "Caja|10|1000", "--traslado", "venta", "--despacho", "emisor-cliente", "--destino-direccion", "Calle 2", "--destino-comuna", "Talca", ...FECHA);
+    const r = await ejecutar(
+      "emitir",
+      "guia",
+      "--receptor",
+      "76430498-5",
+      "--item",
+      "Caja|10|1000",
+      "--traslado",
+      "venta",
+      "--despacho",
+      "emisor-cliente",
+      "--destino-direccion",
+      "Calle 2",
+      "--destino-comuna",
+      "Talca",
+      ...FECHA,
+    );
     expect(r.out.dte.Encabezado.IdDoc).toMatchObject({ TipoDTE: 52, IndTraslado: 1, TipoDespacho: 2 });
     expect(r.out.dte.Encabezado.Transporte).toEqual({ DirDest: "Calle 2", CmnaDest: "Talca" });
     expect(r.out.dte.Encabezado.Totales.MntTotal).toBe(11900);

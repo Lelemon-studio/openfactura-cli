@@ -93,7 +93,14 @@ describe("OpenFacturaClient", () => {
   });
 
   test("una respuesta en Latin-1 conserva las tildes", async () => {
-    const latin1 = new Uint8Array([...'{"razon":"CONSULTOR'].map((c) => c.charCodeAt(0)).concat([0xcd], [...'A"}'].map((c) => c.charCodeAt(0))));
+    const latin1 = new Uint8Array(
+      [...'{"razon":"CONSULTOR']
+        .map((c) => c.charCodeAt(0))
+        .concat(
+          [0xcd],
+          [...'A"}'].map((c) => c.charCodeAt(0)),
+        ),
+    );
     globalThis.fetch = (async () => new Response(latin1, { status: 200 })) as unknown as typeof fetch;
     expect(await cliente().get("/x")).toEqual({ razon: "CONSULTORÍA" });
   });
@@ -121,6 +128,25 @@ describe("OpenFacturaClient", () => {
   test("un 200 con WARNING lo expone sin tratarlo como error", async () => {
     responder(200, { FOLIO: 5, WARNING: "GiroRecep truncado" });
     expect(await cliente().post("/document", {})).toEqual({ FOLIO: 5, WARNING: "GiroRecep truncado" });
+  });
+
+  test("con límite, la cuarta llamada del mismo segundo espera su turno", async () => {
+    let t = 0;
+    const esperas: number[] = [];
+    globalThis.fetch = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+    const c = new OpenFacturaClient({
+      apiKey: "k",
+      baseUrl: "https://api.test",
+      timeoutMs: 1000,
+      limite: { porSegundo: 3, porMinuto: 100 },
+      ahora: () => t,
+      esperar: async (ms) => {
+        esperas.push(ms);
+        t += ms;
+      },
+    });
+    for (let i = 0; i < 4; i++) await c.get("/organization");
+    expect(esperas).toEqual([1000]);
   });
 
   test("ante un 429 espera lo que pide la API y reintenta", async () => {
@@ -155,7 +181,9 @@ describe("OpenFacturaClient", () => {
 
   test("el OF-429 de sync-rcv no se reintenta: trae su propio plazo", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ error: { message: "Límite", code: "OF-429", details: { retry_after: 600 } } }), { status: 429 })) as unknown as typeof fetch;
+      new Response(JSON.stringify({ error: { message: "Límite", code: "OF-429", details: { retry_after: 600 } } }), {
+        status: 429,
+      })) as unknown as typeof fetch;
     let intentos = 0;
     const c = new OpenFacturaClient({ apiKey: "k", baseUrl: "https://api.test", timeoutMs: 1000, esperar: async () => void intentos++ });
     const e = await fallo(c.post("/registry/sync-rcv", {}));

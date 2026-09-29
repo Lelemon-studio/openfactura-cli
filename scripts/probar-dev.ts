@@ -17,7 +17,33 @@ const casos: Array<[string, string[]]> = [
   ["factura-exenta", ["emitir", "factura-exenta", "--receptor", RECEPTOR_DEMO, "--item", `Asesoría ${marca}|2|15000`]],
   ["boleta", ["emitir", "boleta", "--item", `Producto ${marca}|3|1190`]],
   ["boleta-exenta", ["emitir", "boleta-exenta", "--item", `Curso ${marca}|1|5000`]],
-  ["guia", ["emitir", "guia", "--receptor", RECEPTOR_DEMO, "--item", `Caja ${marca}|5|1000`, "--traslado", "venta", "--despacho", "emisor-cliente", "--destino-direccion", "Calle 1", "--destino-comuna", "Talca", "--chofer-rut", "11111111-1", "--chofer-nombre", "Juan Perez", "--transportista-rut", RECEPTOR_DEMO, "--patente", "ABCD12"]],
+  [
+    "guia",
+    [
+      "emitir",
+      "guia",
+      "--receptor",
+      RECEPTOR_DEMO,
+      "--item",
+      `Caja ${marca}|5|1000`,
+      "--traslado",
+      "venta",
+      "--despacho",
+      "emisor-cliente",
+      "--destino-direccion",
+      "Calle 1",
+      "--destino-comuna",
+      "Talca",
+      "--chofer-rut",
+      "11111111-1",
+      "--chofer-nombre",
+      "Juan Perez",
+      "--transportista-rut",
+      RECEPTOR_DEMO,
+      "--patente",
+      "ABCD12",
+    ],
+  ],
 ];
 
 let fallos = 0;
@@ -32,8 +58,14 @@ for (const [nombre, argv] of casos) {
 
 if (emitidos.factura) {
   for (const [nombre, argv] of [
-    ["nota-credito montos", ["emitir", "nota-credito", "--referencia", `33:${emitidos.factura}`, "--corrige-montos", "--razon", "Descuento", "--item", "Descuento|1|3000"]],
-    ["nota-debito", ["emitir", "nota-debito", "--referencia", `33:${emitidos.factura}`, "--corrige-montos", "--razon", "Intereses", "--item", "Intereses|1|500"]],
+    [
+      "nota-credito montos",
+      ["emitir", "nota-credito", "--referencia", `33:${emitidos.factura}`, "--corrige-montos", "--razon", "Descuento", "--item", "Descuento|1|3000"],
+    ],
+    [
+      "nota-debito",
+      ["emitir", "nota-debito", "--referencia", `33:${emitidos.factura}`, "--corrige-montos", "--razon", "Intereses", "--item", "Intereses|1|500"],
+    ],
   ] as Array<[string, string[]]>) {
     const r = await cli(...argv, "--confirmar");
     const ok = r.codigo === 0 && typeof r.out?.folio === "number";
@@ -43,7 +75,10 @@ if (emitidos.factura) {
 
   if (emitidos.boleta) {
     for (const [nombre, argv] of [
-      ["nota-credito boleta", ["emitir", "nota-credito", "--referencia", `39:${emitidos.boleta}`, "--corrige-montos", "--razon", "Devolucion", "--item", "Devolucion|1|1190"]],
+      [
+        "nota-credito boleta",
+        ["emitir", "nota-credito", "--referencia", `39:${emitidos.boleta}`, "--corrige-montos", "--razon", "Devolucion", "--item", "Devolucion|1|1190"],
+      ],
     ] as Array<[string, string[]]>) {
       const r = await cli(...argv, "--confirmar");
       const ok = r.codigo === 0 && typeof r.out?.folio === "number";
@@ -65,14 +100,18 @@ if (emitidos.factura) {
     const r = await cli(...argv, "--confirmar");
     const ok = r.codigo === 2 && String(r.err?.error ?? "").includes("61:");
     if (!ok) fallos++;
-    console.log(`${ok ? "OK  " : "FALLA"} ${nombre.padEnd(28)} ${ok ? "bloqueada: " + r.err.error.slice(0, 120) : JSON.stringify(r.err ?? r.out).slice(0, 200)}`);
+    console.log(
+      `${ok ? "OK  " : "FALLA"} ${nombre.padEnd(28)} ${ok ? `bloqueada: ${r.err.error.slice(0, 120)}` : JSON.stringify(r.err ?? r.out).slice(0, 200)}`,
+    );
   }
   const anula = await cli("emitir", "factura", "--receptor", RECEPTOR_DEMO, "--item", `Para anular ${marca}|1|5000`, "--confirmar");
   if (anula.codigo === 0) {
     const r = await cli("emitir", "nota-credito", "--referencia", `33:${anula.out.folio}`, "--anula", "--confirmar");
     const ok = r.codigo === 0 && typeof r.out?.folio === "number";
     if (!ok) fallos++;
-    console.log(`${ok ? "OK  " : "FALLA"} anular factura limpia          ${ok ? `folio ${r.out.folio} total ${r.out.total}` : JSON.stringify(r.err ?? r.out).slice(0, 200)}`);
+    console.log(
+      `${ok ? "OK  " : "FALLA"} anular factura limpia          ${ok ? `folio ${r.out.folio} total ${r.out.total}` : JSON.stringify(r.err ?? r.out).slice(0, 200)}`,
+    );
   }
 
   const estado = await cli("documento", "estado", "33", String(emitidos.factura));

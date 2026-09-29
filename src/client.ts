@@ -1,8 +1,12 @@
+import { Limitador } from "./limitador.ts";
+
 export interface ClientOptions {
   apiKey: string;
   baseUrl: string;
   timeoutMs: number;
+  limite?: { porSegundo: number; porMinuto: number } | null;
   esperar?: (ms: number) => Promise<void>;
+  ahora?: () => number;
 }
 
 export interface RequestOptions {
@@ -47,7 +51,11 @@ function parsear(texto: string): unknown {
 }
 
 export class OpenFacturaClient {
-  constructor(private readonly opts: ClientOptions) {}
+  private readonly limitador: Limitador | null;
+
+  constructor(private readonly opts: ClientOptions) {
+    this.limitador = opts.limite ? new Limitador({ ...opts.limite, esperar: opts.esperar, ahora: opts.ahora }) : null;
+  }
 
   get(path: string): Promise<unknown> {
     return this.request("GET", path);
@@ -81,6 +89,7 @@ export class OpenFacturaClient {
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
 
+    await this.limitador?.turno();
     const control = new AbortController();
     let vencido = false;
     const reloj = setTimeout(() => {
@@ -101,9 +110,7 @@ export class OpenFacturaClient {
     } catch (e) {
       if (vencido) {
         const extra =
-          method === "POST"
-            ? ". La operación pudo haberse procesado igual: repite exactamente el mismo comando, que la idempotencia evita duplicarla"
-            : "";
+          method === "POST" ? ". La operación pudo haberse procesado igual: repite exactamente el mismo comando, que la idempotencia evita duplicarla" : "";
         throw new ApiError(`OpenFactura no respondió en ${this.opts.timeoutMs} ms${extra}`, 0, "TIMEOUT");
       }
       throw new ApiError(`No se pudo conectar con OpenFactura: ${this.ocultar(String(e))}`, 0, "NETWORK");
@@ -128,8 +135,7 @@ export class OpenFacturaClient {
           : typeof data === "string"
             ? data.slice(0, 500)
             : `HTTP ${status}`;
-    const codigo =
-      typeof interno.code === "string" ? interno.code : status === 401 || status === 403 ? "AUTH" : `HTTP_${status}`;
+    const codigo = typeof interno.code === "string" ? interno.code : status === 401 || status === 403 ? "AUTH" : `HTTP_${status}`;
     const reconocido = typeof interno.message === "string" || typeof d.error === "string";
     const detalles = interno.details ?? (reconocido || typeof data === "string" ? undefined : data);
     return new ApiError(this.ocultar(mensaje), status, codigo, this.ocultarEn(detalles));

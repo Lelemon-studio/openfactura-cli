@@ -1,13 +1,13 @@
 # OpenFactura (Haulmer): catálogo de la API REST
 
-Investigado el 2026-09-27. Sirve de base para un CLI que cubra la API entera.
+Catálogo de la API de OpenFactura que implementa este CLI, armado el 2026-09-27 con la documentación oficial y llamadas reales. Cada dato dice de dónde salió.
 
 ## Etiquetas
 
 | Etiqueta | Qué significa |
 |---|---|
-| **[verificado]** | Comprobado contra la API real por Camilo antes de esta investigación (lo entregó el encargo). No se pisa. |
-| **[verificado-dev]** | Comprobado hoy con llamadas de **solo lectura** a `https://dev-api.haulmer.com` usando la API key demo pública. No se emitió nada ni se tocó producción. |
+| **[verificado]** | Comprobado contra la API real de producción, con una cuenta en uso. |
+| **[verificado-dev]** | Comprobado el 2026-09-27 con llamadas de **solo lectura** a `https://dev-api.haulmer.com` usando la API key demo pública. No se emitió nada ni se tocó producción. |
 | **[doc]** | Aparece en la documentación oficial (colección Postman publicada en docsapi-openfactura.haulmer.com). |
 | **[SII]** | Viene del formato oficial del SII al que la doc de OpenFactura remite para los campos del DTE ("se mantienen los mismos nombres que utiliza el SII"). |
 | **[inferido]** | Deducción razonable que no está escrita en ninguna fuente. |
@@ -188,7 +188,7 @@ Ruta relativa a la base `/v2/dte`. Todos llevan el header `apikey`.
 | 15 | GET | `/taxpayer/{rut}` | Ficha SII de cualquier contribuyente | [verificado] [doc] |
 | 16 | POST | `/anularDTE52` | Anula una guía de despacho (52) | [doc] |
 
-**No existen en la doc** (se buscó en las 18 entradas de la colección y en Context7): webhooks, cesión/factoring (AEC), anulación de otros tipos que no sean la 52, gestión o subida de CAF (OpenFactura los gestiona solo, FAQ 4), reenvío de email fuera de `sendEmail`, borrar o listar enlaces de autoservicio (solo por la interfaz espacio.haulmer.com), consulta de RVD/RCOF, y links de pago. Un CLI que los ofrezca no tendría respaldo en la API documentada.
+**No existen en la doc** (se revisaron las 18 entradas de la colección): webhooks, cesión/factoring (AEC), anulación de otros tipos que no sean la 52, gestión o subida de CAF (OpenFactura los gestiona solo, FAQ 4), reenvío de email fuera de `sendEmail`, borrar o listar enlaces de autoservicio (solo por la interfaz espacio.haulmer.com), consulta de RVD/RCOF, y links de pago. Un CLI que los ofrezca no tendría respaldo en la API documentada.
 
 ---
 
