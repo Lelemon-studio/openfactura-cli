@@ -1,0 +1,50 @@
+{
+  "name": "openfactura-cli",
+  "version": "0.1.0",
+  "description": "CLI para la API de OpenFactura (Haulmer): emitir y consultar documentos tributarios electrónicos del SII.",
+  "type": "module",
+  "bin": {
+    "openfactura": "./dist/cli.js"
+  },
+  "files": [
+    "dist/cli.js",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "bun src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/main.ts --target=node --outfile=dist/cli.js && bun build src/main.ts --compile --outfile=dist/openfactura",
+    "build:node": "bun build src/main.ts --target=node --outfile=dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "license": "MIT",
+  "author": "Lelemon SpA",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lelemon-studio/openfactura-cli.git"
+  },
+  "homepage": "https://github.com/Lelemon-studio/openfactura-cli#readme",
+  "bugs": {
+    "url": "https://github.com/Lelemon-studio/openfactura-cli/issues"
+  },
+  "keywords": [
+    "openfactura",
+    "haulmer",
+    "sii",
+    "dte",
+    "factura-electronica",
+    "boleta-electronica",
+    "chile",
+    "cli",
+    "claude"
+  ]
+}
