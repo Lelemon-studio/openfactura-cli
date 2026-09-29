@@ -224,3 +224,39 @@ describe("topes y opciones", () => {
     expect((await ejecutar("emitir", "archivo", archivo)).codigo).toBe(2);
   });
 });
+
+describe("formato del SII", () => {
+  test("una línea con precio cero no manda PrcItem", async () => {
+    const r = await ejecutar("emitir", "guia", "--receptor", "76430498-5", "--item", "Caja|3|0", "--traslado", "interno", ...HOY);
+    expect(r.out.dte.Detalle[0].PrcItem).toBeUndefined();
+    expect(r.out.dte.Detalle[0].MontoItem).toBe(0);
+  });
+
+  test("corregir texto no manda PrcItem en cero", async () => {
+    const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-texto", "--razon", "Corrige giro", ...HOY);
+    expect(r.out.dte.Detalle[0].PrcItem).toBeUndefined();
+  });
+
+  test("--ref en boleta se rechaza: la boleta tiene otro esquema de referencias", async () => {
+    expect((await ejecutar("emitir", "boleta", "--item", "x|1|1190", "--ref", "801:OC-1:2026-09-01", ...HOY)).codigo).toBe(2);
+  });
+
+  test("el DTE sale en el orden del XSD", async () => {
+    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000|exento", "--item", "y|1|1000", "--correo", "a@b.cl", ...HOY);
+    expect(Object.keys(r.out.dte.Encabezado.Receptor)).toEqual(["RUTRecep", "RznSocRecep", "GiroRecep", "CorreoRecep", "DirRecep", "CmnaRecep"]);
+    expect(Object.keys(r.out.dte.Detalle[0])[1]).toBe("IndExe");
+  });
+
+  test("una dirección del SII demasiado larga se recorta con aviso", async () => {
+    rutas["GET /taxpayer/76430498-5"] = [{ status: 200, body: { ...HOSTY, direccion: "CALLE ".repeat(15) } }];
+    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", ...HOY);
+    expect(r.out.dte.Encabezado.Receptor.DirRecep.length).toBeLessThanOrEqual(70);
+    expect(r.out.avisos.join(" ")).toContain("dirección");
+  });
+
+  test("una comuna escrita a mano demasiado larga es error", async () => {
+    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--comuna", "x".repeat(21), "--item", "x|1|1000", ...HOY);
+    expect(r.codigo).toBe(2);
+    expect(r.err.error).toContain("CmnaRecep");
+  });
+});

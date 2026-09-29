@@ -8,6 +8,7 @@ import { normalizarRut } from "../rut.ts";
 import { parsearItem } from "../dte/items.ts";
 import { emisorDesdeOrganizacion, RECEPTOR_CONSUMIDOR_FINAL, receptorDesdeFicha } from "../dte/partes.ts";
 import { calcularTotales, type Linea, type Modo, TASA_IVA } from "../dte/totales.ts";
+import { ordenarDte, validarContraEsquema } from "../dte/esquema.ts";
 import { entero } from "./lecturas.ts";
 
 type Obj = Record<string, any>;
@@ -85,7 +86,7 @@ function detalle(lineas: Array<Linea & { monto: number }>): Obj[] {
     NmbItem: l.nombre,
     ...(l.descripcion ? { DscItem: l.descripcion } : {}),
     QtyItem: l.cantidad,
-    PrcItem: l.precio,
+    ...(l.precio > 0 ? { PrcItem: l.precio } : {}),
     MontoItem: l.monto,
     ...(l.exento ? { IndExe: 1 } : {}),
   }));
@@ -422,10 +423,13 @@ async function emitirTipo(ctx: Contexto, nombre: string) {
     throw new UsageError("--referencia y --sin-rebaja son sólo para notas de crédito y débito. Para citar una guía u orden de compra usa --ref");
   }
   if (tipo.nota && lista(ctx, "ref").length) throw new UsageError("En una nota el documento corregido va con --referencia, no con --ref");
+  if (tipo.boleta && lista(ctx, "ref").length) {
+    throw new UsageError("La boleta no lleva --ref: su esquema de referencias es otro. Si hace falta, arma el DTE y emítelo con: openfactura emitir archivo");
+  }
 
   const org = ((await ctx.client.get("/organization")) ?? {}) as Obj;
   const acteco = texto(ctx.flags, "acteco");
-  const emisor = emisorDesdeOrganizacion(org, tipo.boleta, acteco ? entero(acteco, "--acteco") : undefined);
+  const emisor = emisorDesdeOrganizacion(org, tipo.boleta, acteco ? entero(acteco, "--acteco") : undefined, avisos);
   const rutPropio = normalizarRut(String(emisor.RUTEmisor));
 
   const ref = tipo.nota ? await referenciaNota(ctx, tipo, rutPropio) : undefined;
@@ -473,7 +477,7 @@ async function emitirTipo(ctx: Contexto, nombre: string) {
     totales = totalesDte(origTotales!, tipo, modo);
   } else if (ref?.codRef === 2) {
     if (entrada.length) throw new UsageError("--corrige-texto no lleva --item: la corrección va en --razon");
-    det = [{ NroLinDet: 1, NmbItem: ref.razon, QtyItem: 1, PrcItem: 0, MontoItem: 0, ...(modo === "exento" ? { IndExe: 1 } : {}) }];
+    det = [{ NroLinDet: 1, NmbItem: ref.razon, QtyItem: 1, MontoItem: 0, ...(modo === "exento" ? { IndExe: 1 } : {}) }];
     totales = totalesDte({ MntNeto: 0, MntExe: 0, IVA: 0, MntTotal: 0 }, tipo, modo);
   } else {
     if (!ref && entrada.length && entrada.every((l) => l.exento) && (tipo.codigo === 33 || tipo.codigo === 39)) {
@@ -580,13 +584,15 @@ async function emitirTipo(ctx: Contexto, nombre: string) {
   }
   encabezado.Totales = totales;
 
-  const dte: Obj = { Encabezado: encabezado, Detalle: det };
+  let dte: Obj = { Encabezado: encabezado, Detalle: det };
   if (ref) {
     dte.Referencia = [{ NroLinRef: 1, TpoDocRef: String(ref.tipo), FolioRef: ref.folio, FchRef: ref.fecha, CodRef: ref.codRef, RazonRef: ref.razon }];
   } else {
     const refs = await referenciasLibres(ctx, rutPropio);
     if (refs.length) dte.Referencia = refs;
   }
+  dte = ordenarDte(dte, tipo.boleta);
+  validarContraEsquema(dte, tipo.boleta);
 
   const resumen = {
     tipo: tipo.codigo,

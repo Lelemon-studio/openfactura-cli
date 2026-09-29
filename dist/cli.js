@@ -714,6 +714,236 @@ function parsearItem(texto2, i, avisos) {
   };
 }
 
+// src/dte/esquema.ts
+var ORDEN_DTE = {
+  Documento: ["Encabezado", "Detalle", "SubTotInfo", "DscRcgGlobal", "Referencia", "GeoRefEmision", "ManejoMadera", "Comisiones"],
+  Encabezado: ["IdDoc", "Emisor", "RUTMandante", "Receptor", "RUTSolicita", "Transporte", "Totales", "OtraMoneda"],
+  IdDoc: [
+    "TipoDTE",
+    "Folio",
+    "FchEmis",
+    "IndNoRebaja",
+    "TipoDespacho",
+    "IndTraslado",
+    "TpoImpresion",
+    "IndServicio",
+    "MntBruto",
+    "TpoTranCompra",
+    "TpoTranVenta",
+    "FmaPago",
+    "FmaPagExp",
+    "FchCancel",
+    "MntCancel",
+    "SaldoInsol",
+    "MntPagos",
+    "PeriodoDesde",
+    "PeriodoHasta",
+    "MedioPago",
+    "TpoCtaPago",
+    "NumCtaPago",
+    "BcoPago",
+    "TermPagoCdg",
+    "TermPagoGlosa",
+    "TermPagoDias",
+    "FchVenc",
+    "TipoFactEsp"
+  ],
+  Emisor: [
+    "RUTEmisor",
+    "RznSoc",
+    "GiroEmis",
+    "Telefono",
+    "CorreoEmisor",
+    "Acteco",
+    "GuiaExport",
+    "Sucursal",
+    "CdgSIISucur",
+    "DirOrigen",
+    "CmnaOrigen",
+    "CiudadOrigen",
+    "CdgVendedor",
+    "IdAdicEmisor",
+    "RUTProveedor",
+    "RznSocProveedor"
+  ],
+  Receptor: [
+    "RUTRecep",
+    "CdgIntRecep",
+    "RznSocRecep",
+    "Extranjero",
+    "GiroRecep",
+    "Contacto",
+    "CorreoRecep",
+    "DirRecep",
+    "CmnaRecep",
+    "CiudadRecep",
+    "DirPostal",
+    "CmnaPostal",
+    "CiudadPostal"
+  ],
+  Transporte: ["Patente", "PatenteCarro", "RUTTrans", "Chofer", "DirDest", "CmnaDest", "CiudadDest", "Aduana", "FchSalida", "HraSalida", "FchLlegada"],
+  Chofer: ["RUTChofer", "NombreChofer"],
+  Totales: [
+    "MntNeto",
+    "MntExe",
+    "MntBase",
+    "MntMargenCom",
+    "TasaIVA",
+    "IVA",
+    "IVAProp",
+    "IVATerc",
+    "ImptoReten",
+    "IVANoRet",
+    "CredEC",
+    "GrntDep",
+    "Comisiones",
+    "MntTotal",
+    "MontoNF",
+    "MontoPeriodo",
+    "SaldoAnterior",
+    "VlrPagar"
+  ],
+  Detalle: [
+    "NroLinDet",
+    "CdgItem",
+    "IndExe",
+    "Retenedor",
+    "NmbItem",
+    "DscItem",
+    "QtyRef",
+    "UnmdRef",
+    "PrcRef",
+    "QtyItem",
+    "Subcantidad",
+    "FchElabor",
+    "FchVencim",
+    "UnmdItem",
+    "PrcItem",
+    "OtrMnda",
+    "DescuentoPct",
+    "DescuentoMonto",
+    "SubDscto",
+    "RecargoPct",
+    "RecargoMonto",
+    "SubRecargo",
+    "CodImpAdic",
+    "MontoItem"
+  ],
+  Referencia: ["NroLinRef", "TpoDocRef", "IndGlobal", "FolioRef", "RUTOtr", "FchRef", "CodRef", "RazonRef"]
+};
+var ORDEN_BOLETA = {
+  Documento: ["Encabezado", "Detalle", "SubTotInfo", "DscRcgGlobal", "Referencia", "GeoRefEmision"],
+  Encabezado: ["IdDoc", "Emisor", "Receptor", "RUTProvSW", "Totales"],
+  IdDoc: ["TipoDTE", "Folio", "FchEmis", "IndServicio", "IndMntNeto", "PeriodoDesde", "PeriodoHasta", "FchVenc", "MedioPago"],
+  Emisor: ["RUTEmisor", "RznSocEmisor", "GiroEmisor", "CdgSIISucur", "DirOrigen", "CmnaOrigen", "CiudadOrigen"],
+  Receptor: [
+    "RUTRecep",
+    "CdgIntRecep",
+    "RznSocRecep",
+    "Contacto",
+    "CorreoRecep",
+    "TelefonoRecep",
+    "DirRecep",
+    "CmnaRecep",
+    "CiudadRecep",
+    "DirPostal",
+    "CmnaPostal",
+    "CiudadPostal"
+  ],
+  Totales: ["MntNeto", "MntExe", "IVA", "MntTotal", "MontoNF", "TotalPeriodo", "SaldoAnterior", "VlrPagar"],
+  Detalle: [
+    "NroLinDet",
+    "CdgItem",
+    "IndExe",
+    "ItemEspectaculo",
+    "RUTMandante",
+    "NmbItem",
+    "InfoTicket",
+    "DscItem",
+    "QtyItem",
+    "UnmdItem",
+    "PrcItem",
+    "DescuentoPct",
+    "DescuentoMonto",
+    "RecargoPct",
+    "RecargoMonto",
+    "MontoItem"
+  ],
+  Referencia: ["NroLinRef", "TpoDocRef", "FolioRef", "CodRef", "RazonRef", "CodVndor", "CodCaja"]
+};
+var LARGOS = {
+  RznSoc: 100,
+  RznSocEmisor: 100,
+  GiroEmis: 80,
+  GiroEmisor: 80,
+  DirOrigen: 70,
+  CmnaOrigen: 20,
+  RznSocRecep: 100,
+  GiroRecep: 40,
+  Contacto: 80,
+  CorreoRecep: 80,
+  DirRecep: 70,
+  CmnaRecep: 20,
+  NmbItem: 80,
+  DscItem: 1000,
+  RazonRef: 90,
+  FolioRef: 18,
+  Patente: 8,
+  PatenteCarro: 8,
+  NombreChofer: 30,
+  DirDest: 70,
+  CmnaDest: 20
+};
+var MAX_LINEAS = { dte: 60, boleta: 1000 };
+var MAX_REFERENCIAS = 40;
+function ordenar(valor, seccion, orden) {
+  if (Array.isArray(valor))
+    return valor.map((v) => ordenar(v, seccion, orden));
+  const claves = orden[seccion];
+  if (!claves || !valor || typeof valor !== "object")
+    return valor;
+  const o = valor;
+  const conocidas = claves.filter((k) => (k in o));
+  const otras = Object.keys(o).filter((k) => !claves.includes(k));
+  const salida = {};
+  for (const k of [...conocidas, ...otras])
+    salida[k] = orden[k] ? ordenar(o[k], k, orden) : o[k];
+  return salida;
+}
+function ordenarDte(dte, esBoleta) {
+  return ordenar(dte, "Documento", esBoleta ? ORDEN_BOLETA : ORDEN_DTE);
+}
+function revisarLargos(valor, ruta, errores) {
+  if (Array.isArray(valor)) {
+    valor.forEach((v, i) => revisarLargos(v, `${ruta}[${i + 1}]`, errores));
+    return;
+  }
+  if (!valor || typeof valor !== "object")
+    return;
+  for (const [k, v] of Object.entries(valor)) {
+    const limite = LARGOS[k];
+    if (limite !== undefined && typeof v === "string" && v.length > limite) {
+      errores.push(`${ruta}.${k} tiene ${v.length} caracteres y el SII admite ${limite}`);
+    } else if (limite !== undefined && typeof v === "number" && String(v).length > limite) {
+      errores.push(`${ruta}.${k} tiene ${String(v).length} dígitos y el SII admite ${limite}`);
+    }
+    revisarLargos(v, `${ruta}.${k}`, errores);
+  }
+}
+function validarContraEsquema(dte, esBoleta) {
+  const errores = [];
+  const maxLineas = esBoleta ? MAX_LINEAS.boleta : MAX_LINEAS.dte;
+  if (Array.isArray(dte.Detalle) && dte.Detalle.length > maxLineas) {
+    errores.push(`El documento tiene ${dte.Detalle.length} líneas de detalle y el SII admite ${maxLineas}`);
+  }
+  if (Array.isArray(dte.Referencia) && dte.Referencia.length > MAX_REFERENCIAS) {
+    errores.push(`El documento tiene ${dte.Referencia.length} referencias y el SII admite ${MAX_REFERENCIAS}`);
+  }
+  revisarLargos(dte, "dte", errores);
+  if (errores.length)
+    throw new ValidationError(`El documento no cumple el formato del SII: ${errores.join("; ")}`, errores);
+}
+
 // src/dte/partes.ts
 var MAX_GIRO_RECEPTOR = 40;
 var RECEPTOR_CONSUMIDOR_FINAL = {
@@ -723,6 +953,24 @@ var RECEPTOR_CONSUMIDOR_FINAL = {
   CmnaRecep: "Santiago"
 };
 var limpio = (v) => typeof v === "string" ? v.replace(/\s{2,}/g, " ").trim() : "";
+var NOMBRES = {
+  RznSoc: "la razón social del emisor",
+  RznSocEmisor: "la razón social del emisor",
+  GiroEmis: "el giro del emisor",
+  GiroEmisor: "el giro del emisor",
+  DirOrigen: "la dirección del emisor",
+  CmnaOrigen: "la comuna del emisor",
+  RznSocRecep: "la razón social del receptor",
+  DirRecep: "la dirección del receptor",
+  CmnaRecep: "la comuna del receptor"
+};
+function delSii(campo, valor, avisos) {
+  const limite = LARGOS[campo];
+  if (limite === undefined || valor.length <= limite)
+    return valor;
+  avisos.push(`El SII trae ${NOMBRES[campo] ?? campo} con ${valor.length} caracteres; se recortó a ${limite}, que es lo que admite el formato del SII`);
+  return valor.slice(0, limite).trim();
+}
 function actividades(ficha) {
   return Array.isArray(ficha.actividades) ? ficha.actividades : [];
 }
@@ -730,12 +978,12 @@ function principal(ficha) {
   const lista = actividades(ficha).filter((a) => a.giro || a.codigoActividadEconomica);
   return lista.find((a) => a.actividadPrincipal) ?? lista[0];
 }
-function emisorDesdeOrganizacion(org, esBoleta, acteco) {
+function emisorDesdeOrganizacion(org, esBoleta, acteco, avisos = []) {
   const rut = limpio(org.rut);
-  const razon = limpio(org.razonSocial);
-  const giro = limpio(org.glosaDescriptiva) || limpio(principal(org)?.giro);
-  const dir = limpio(org.direccion);
-  const comuna = limpio(org.comuna);
+  const razon = delSii(esBoleta ? "RznSocEmisor" : "RznSoc", limpio(org.razonSocial), avisos);
+  const giro = delSii(esBoleta ? "GiroEmisor" : "GiroEmis", limpio(org.glosaDescriptiva) || limpio(principal(org)?.giro), avisos);
+  const dir = delSii("DirOrigen", limpio(org.direccion), avisos);
+  const comuna = delSii("CmnaOrigen", limpio(org.comuna), avisos);
   const faltan = [!rut && "rut", !razon && "razón social", !giro && "giro", !dir && "dirección", !comuna && "comuna"].filter(Boolean);
   if (faltan.length)
     throw new ValidationError(`OpenFactura no devolvió estos datos del emisor: ${faltan.join(", ")}`);
@@ -751,9 +999,9 @@ function emisorDesdeOrganizacion(org, esBoleta, acteco) {
 }
 function receptorDesdeFicha(rut, ficha, manual, esBoleta, avisos) {
   const encontrado = Boolean(ficha.razonSocial || ficha.direccion);
-  const razon = manual.razonSocial ?? limpio(ficha.razonSocial);
-  const direccion = manual.direccion ?? limpio(ficha.direccion);
-  const comuna = manual.comuna ?? limpio(ficha.comuna);
+  const razon = manual.razonSocial ?? delSii("RznSocRecep", limpio(ficha.razonSocial), avisos);
+  const direccion = manual.direccion ?? delSii("DirRecep", limpio(ficha.direccion), avisos);
+  const comuna = manual.comuna ?? delSii("CmnaRecep", limpio(ficha.comuna), avisos);
   if (!razon) {
     throw new ValidationError(encontrado ? `El SII no trae razón social para ${rut}. Pásala con --razon-social` : `El SII no conoce el RUT ${rut}. Revisa el RUT o pasa los datos a mano con --razon-social, --direccion y --comuna`);
   }
@@ -897,7 +1145,7 @@ function detalle(lineas) {
     NmbItem: l.nombre,
     ...l.descripcion ? { DscItem: l.descripcion } : {},
     QtyItem: l.cantidad,
-    PrcItem: l.precio,
+    ...l.precio > 0 ? { PrcItem: l.precio } : {},
     MontoItem: l.monto,
     ...l.exento ? { IndExe: 1 } : {}
   }));
@@ -1215,9 +1463,12 @@ async function emitirTipo(ctx, nombre) {
   }
   if (tipo.nota && lista(ctx, "ref").length)
     throw new UsageError("En una nota el documento corregido va con --referencia, no con --ref");
+  if (tipo.boleta && lista(ctx, "ref").length) {
+    throw new UsageError("La boleta no lleva --ref: su esquema de referencias es otro. Si hace falta, arma el DTE y emítelo con: openfactura emitir archivo");
+  }
   const org = await ctx.client.get("/organization") ?? {};
   const acteco = texto(ctx.flags, "acteco");
-  const emisor = emisorDesdeOrganizacion(org, tipo.boleta, acteco ? entero(acteco, "--acteco") : undefined);
+  const emisor = emisorDesdeOrganizacion(org, tipo.boleta, acteco ? entero(acteco, "--acteco") : undefined, avisos);
   const rutPropio = normalizarRut(String(emisor.RUTEmisor));
   const ref = tipo.nota ? await referenciaNota(ctx, tipo, rutPropio) : undefined;
   const modo = ref ? TIPOS_EXENTOS.has(ref.tipo) ? "exento" : TIPOS_BOLETA.has(ref.tipo) ? "bruto" : "neto" : tipo.modo;
@@ -1263,7 +1514,7 @@ async function emitirTipo(ctx, nombre) {
   } else if (ref?.codRef === 2) {
     if (entrada.length)
       throw new UsageError("--corrige-texto no lleva --item: la corrección va en --razon");
-    det = [{ NroLinDet: 1, NmbItem: ref.razon, QtyItem: 1, PrcItem: 0, MontoItem: 0, ...modo === "exento" ? { IndExe: 1 } : {} }];
+    det = [{ NroLinDet: 1, NmbItem: ref.razon, QtyItem: 1, MontoItem: 0, ...modo === "exento" ? { IndExe: 1 } : {} }];
     totales = totalesDte({ MntNeto: 0, MntExe: 0, IVA: 0, MntTotal: 0 }, tipo, modo);
   } else {
     if (!ref && entrada.length && entrada.every((l) => l.exento) && (tipo.codigo === 33 || tipo.codigo === 39)) {
@@ -1371,7 +1622,7 @@ async function emitirTipo(ctx, nombre) {
       avisos.push("Es una guía de venta con monto cero: revisa los precios, o usa otro --traslado si no es venta");
   }
   encabezado.Totales = totales;
-  const dte = { Encabezado: encabezado, Detalle: det };
+  let dte = { Encabezado: encabezado, Detalle: det };
   if (ref) {
     dte.Referencia = [{ NroLinRef: 1, TpoDocRef: String(ref.tipo), FolioRef: ref.folio, FchRef: ref.fecha, CodRef: ref.codRef, RazonRef: ref.razon }];
   } else {
@@ -1379,6 +1630,8 @@ async function emitirTipo(ctx, nombre) {
     if (refs.length)
       dte.Referencia = refs;
   }
+  dte = ordenarDte(dte, tipo.boleta);
+  validarContraEsquema(dte, tipo.boleta);
   const resumen = {
     tipo: tipo.codigo,
     nombre,

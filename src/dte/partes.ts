@@ -1,4 +1,5 @@
 import { ValidationError } from "../command.ts";
+import { LARGOS } from "./esquema.ts";
 
 export const MAX_GIRO_RECEPTOR = 40;
 export const RECEPTOR_CONSUMIDOR_FINAL = {
@@ -11,6 +12,25 @@ export const RECEPTOR_CONSUMIDOR_FINAL = {
 type Obj = Record<string, unknown>;
 
 const limpio = (v: unknown) => (typeof v === "string" ? v.replace(/\s{2,}/g, " ").trim() : "");
+
+const NOMBRES: Record<string, string> = {
+  RznSoc: "la razón social del emisor",
+  RznSocEmisor: "la razón social del emisor",
+  GiroEmis: "el giro del emisor",
+  GiroEmisor: "el giro del emisor",
+  DirOrigen: "la dirección del emisor",
+  CmnaOrigen: "la comuna del emisor",
+  RznSocRecep: "la razón social del receptor",
+  DirRecep: "la dirección del receptor",
+  CmnaRecep: "la comuna del receptor",
+};
+
+function delSii(campo: string, valor: string, avisos: string[]): string {
+  const limite = LARGOS[campo];
+  if (limite === undefined || valor.length <= limite) return valor;
+  avisos.push(`El SII trae ${NOMBRES[campo] ?? campo} con ${valor.length} caracteres; se recortó a ${limite}, que es lo que admite el formato del SII`);
+  return valor.slice(0, limite).trim();
+}
 
 interface Actividad {
   giro?: string | null;
@@ -27,12 +47,12 @@ function principal(ficha: Obj): Actividad | undefined {
   return lista.find((a) => a.actividadPrincipal) ?? lista[0];
 }
 
-export function emisorDesdeOrganizacion(org: Obj, esBoleta: boolean, acteco?: number): Obj {
+export function emisorDesdeOrganizacion(org: Obj, esBoleta: boolean, acteco?: number, avisos: string[] = []): Obj {
   const rut = limpio(org.rut);
-  const razon = limpio(org.razonSocial);
-  const giro = limpio(org.glosaDescriptiva) || limpio(principal(org)?.giro);
-  const dir = limpio(org.direccion);
-  const comuna = limpio(org.comuna);
+  const razon = delSii(esBoleta ? "RznSocEmisor" : "RznSoc", limpio(org.razonSocial), avisos);
+  const giro = delSii(esBoleta ? "GiroEmisor" : "GiroEmis", limpio(org.glosaDescriptiva) || limpio(principal(org)?.giro), avisos);
+  const dir = delSii("DirOrigen", limpio(org.direccion), avisos);
+  const comuna = delSii("CmnaOrigen", limpio(org.comuna), avisos);
   const faltan = [!rut && "rut", !razon && "razón social", !giro && "giro", !dir && "dirección", !comuna && "comuna"].filter(Boolean);
   if (faltan.length) throw new ValidationError(`OpenFactura no devolvió estos datos del emisor: ${faltan.join(", ")}`);
   const sucursal = limpio(org.cdgSIISucur);
@@ -58,9 +78,9 @@ export interface DatosReceptor {
 
 export function receptorDesdeFicha(rut: string, ficha: Obj, manual: DatosReceptor, esBoleta: boolean, avisos: string[]): Obj {
   const encontrado = Boolean(ficha.razonSocial || ficha.direccion);
-  const razon = manual.razonSocial ?? limpio(ficha.razonSocial);
-  const direccion = manual.direccion ?? limpio(ficha.direccion);
-  const comuna = manual.comuna ?? limpio(ficha.comuna);
+  const razon = manual.razonSocial ?? delSii("RznSocRecep", limpio(ficha.razonSocial), avisos);
+  const direccion = manual.direccion ?? delSii("DirRecep", limpio(ficha.direccion), avisos);
+  const comuna = manual.comuna ?? delSii("CmnaRecep", limpio(ficha.comuna), avisos);
 
   if (!razon) {
     throw new ValidationError(

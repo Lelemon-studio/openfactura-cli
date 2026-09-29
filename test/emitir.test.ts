@@ -296,7 +296,7 @@ describe("nota de crédito", () => {
 
   test("corrige texto: montos en cero y la corrección en el detalle", async () => {
     const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-texto", "--razon", "Corrige giro del receptor", ...FECHA);
-    expect(r.out.dte.Detalle).toEqual([{ NroLinDet: 1, NmbItem: "Corrige giro del receptor", QtyItem: 1, PrcItem: 0, MontoItem: 0 }]);
+    expect(r.out.dte.Detalle).toEqual([{ NroLinDet: 1, NmbItem: "Corrige giro del receptor", QtyItem: 1, MontoItem: 0 }]);
     expect(r.out.dte.Encabezado.Totales).toEqual({ MntNeto: 0, TasaIVA: 19, IVA: 0, MntTotal: 0 });
     expect(r.out.dte.Referencia[0].CodRef).toBe(2);
   });
