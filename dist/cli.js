@@ -2117,66 +2117,9 @@ var SKILLS = [
 
 // src/commands/index.ts
 var COMANDOS = [...LECTURAS, ...EMISION, ...SKILLS];
-// package.json
-var package_default = {
-  name: "openfactura-cli",
-  version: "0.2.0",
-  description: "CLI no oficial para la API de OpenFactura (Haulmer): emitir y consultar documentos tributarios electrónicos del SII.",
-  type: "module",
-  bin: {
-    openfactura: "./dist/cli.js"
-  },
-  files: [
-    "dist/cli.js",
-    "skill",
-    "README.md",
-    "LICENSE"
-  ],
-  engines: {
-    node: ">=20"
-  },
-  scripts: {
-    dev: "bun src/main.ts",
-    test: "bun test",
-    typecheck: "tsc --noEmit",
-    build: "bun build src/main.ts --target=node --outfile=dist/cli.js && bun build src/main.ts --compile --outfile=dist/openfactura",
-    "build:node": "bun build src/main.ts --target=node --outfile=dist/cli.js",
-    "test:xsd": "bun scripts/validar-xsd.ts",
-    lint: "biome check --error-on-warnings .",
-    format: "biome check --write .",
-    prepack: "bun run build:node"
-  },
-  devDependencies: {
-    "@biomejs/biome": "2.5.14",
-    "@types/bun": "1.4.2",
-    typescript: "5.9.3"
-  },
-  license: "MIT",
-  author: "Lelemon SpA",
-  repository: {
-    type: "git",
-    url: "git+https://github.com/Lelemon-studio/openfactura-cli.git"
-  },
-  homepage: "https://github.com/Lelemon-studio/openfactura-cli#readme",
-  bugs: {
-    url: "https://github.com/Lelemon-studio/openfactura-cli/issues"
-  },
-  keywords: [
-    "openfactura",
-    "haulmer",
-    "sii",
-    "dte",
-    "factura-electronica",
-    "boleta-electronica",
-    "chile",
-    "cli",
-    "claude"
-  ],
-  packageManager: "bun@1.3.14"
-};
 
 // src/version.ts
-var VERSION = package_default.version;
+var VERSION = "0.2.0";
 
 // src/cli.ts
 var FLAGS_GLOBALES = {

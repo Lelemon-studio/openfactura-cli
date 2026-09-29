@@ -1,7 +1,7 @@
 # openfactura-cli
 
-> Proyecto independiente de [Lelemon](https://lelemon.cl). No es un producto oficial de Haulmer ni de
-> OpenFactura, ni está afiliado a ellos. "OpenFactura" y "Haulmer" son marcas de sus dueños.
+> Proyecto de [Lelemon](https://lelemon.cl). No es un producto oficial de Haulmer ni de OpenFactura, ni
+> tiene su soporte. "OpenFactura" y "Haulmer" son marcas de sus dueños.
 
 CLI para la API de [OpenFactura](https://www.openfactura.cl) (Haulmer): emite y consulta documentos
 tributarios electrónicos del SII desde la terminal. Está pensado para que Claude lo opere por ti, pero
@@ -28,7 +28,7 @@ Necesitas Node 20 o superior.
 
 ```bash
 npm install -g https://github.com/Lelemon-studio/openfactura-cli/releases/download/v0.2.0/openfactura-cli-0.2.0.tgz
-openfactura --version
+openfactura --version   # o -v
 ```
 
 Las versiones están en [Releases](https://github.com/Lelemon-studio/openfactura-cli/releases). También
@@ -136,7 +136,8 @@ openfactura emitir boleta --dev --item "Prueba|1|1190" --confirmar
 
 ## Errores
 
-Los errores salen por stderr como `{"error": "...", "code": "...", "details": ...}`. El código de salida
+Los errores salen por stderr como `{"error": "...", "code": "..."}`, y los que vienen de la API traen
+también `status` (el HTTP) y `details`. Los de validación pueden traer `details`. El código de salida
 es `1` si el problema vino de OpenFactura, el SII o la red, y `2` si está en lo que se le pasó al CLI.
 
 | `code` | Salida | Qué pasó |

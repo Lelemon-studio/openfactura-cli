@@ -257,7 +257,7 @@ describe("el original tiene que ser coherente", () => {
       status: 200,
       body: {
         json: {
-          Encabezado: { IdDoc: { TipoDTE: 33, FchEmis: "2026-09-20" }, Emisor: { RUTEmisor: "78486848-6" }, Receptor: RECEPTOR, ...TOT_30 },
+          Encabezado: { IdDoc: { TipoDTE: 33, FchEmis: "2026-09-20" }, Emisor: { RUTEmisor: "10000013-K" }, Receptor: RECEPTOR, ...TOT_30 },
           Detalle: [],
         },
       },
