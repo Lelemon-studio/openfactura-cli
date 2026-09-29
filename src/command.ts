@@ -24,6 +24,7 @@ export interface Comando {
   uso: string;
   flags?: NonNullable<ParseArgsConfig["options"]>;
   sinClave?: boolean;
+  minArgs?: number;
   maxArgs?: number;
   run: (ctx: Contexto) => unknown;
 }

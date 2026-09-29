@@ -108,14 +108,17 @@ export async function run(argv: string[], env: Record<string, string | undefined
     if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0 || timeout > 2_147_483_647)) {
       throw new UsageError("--timeout debe ser un número de milisegundos, de 1 a 2147483647");
     }
+    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
+      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
+    }
+    if (comando.minArgs !== undefined && positionals.length < comando.minArgs) {
+      throw new UsageError(`Faltan argumentos. Uso: ${comando.uso}`);
+    }
     let config = undefined as unknown as Config;
     let client = undefined as unknown as OpenFacturaClient;
     if (!comando.sinClave) {
       config = resolveConfig({ apiKey: values["api-key"] as string | undefined, dev: values.dev as boolean | undefined, timeoutMs: timeout }, env);
       client = new OpenFacturaClient(config);
-    }
-    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
-      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
     }
     const resultado = await comando.run({ client, config, flags: values, args: positionals, io, env });
     if (resultado !== undefined) io.out(JSON.stringify(resultado, null, 2));

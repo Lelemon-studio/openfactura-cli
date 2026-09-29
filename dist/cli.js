@@ -487,6 +487,7 @@ var LECTURAS = [
   },
   {
     nombre: "contribuyente",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Ficha del SII de cualquier RUT: razón social, giro, dirección y sucursales",
     uso: [
@@ -512,6 +513,7 @@ var LECTURAS = [
   },
   {
     nombre: "documento",
+    minArgs: 1,
     maxArgs: 3,
     resumen: "Estado ante el SII, JSON, XML, PDF o copia cedible de un documento",
     uso: [
@@ -596,6 +598,7 @@ var LECTURAS = [
   },
   {
     nombre: "acusar",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Acepta o reclama un documento recibido ante el SII (pide --confirmar)",
     uso: [
@@ -623,6 +626,7 @@ var LECTURAS = [
   },
   {
     nombre: "ventas",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de ventas de un mes o un día, por tipo de documento",
     uso: "openfactura ventas <AAAA-MM | AAAA-MM-DD>",
@@ -630,6 +634,7 @@ var LECTURAS = [
   },
   {
     nombre: "compras",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de compras de un mes o un día, separado por estado",
     uso: [
@@ -654,6 +659,7 @@ var LECTURAS = [
   },
   {
     nombre: "sincronizar-rcv",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Pide a OpenFactura traer del SII el registro de compras o ventas de un mes",
     uso: [
@@ -675,6 +681,7 @@ var LECTURAS = [
   },
   {
     nombre: "anular-guia",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Anula una guía de despacho (52) ante el SII (pide --confirmar)",
     uso: [
@@ -1300,7 +1307,7 @@ async function referenciaNota(ctx, tipo, rutPropio) {
   if (codRef === 2 && razon.length > MAX_NMB_ITEM) {
     throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${MAX_NMB_ITEM} caracteres`);
   }
-  const r = await ctx.client.get(`/document/${rutPropio}/${tipoRef}/${folio}/json`);
+  const r = await leerDocumento(ctx, rutPropio, tipoRef, folio);
   const original = r?.json;
   if (!original?.Encabezado)
     throw new ValidationError(`No se pudo leer el documento ${tipoRef} folio ${folio} para referenciarlo`);
@@ -1315,6 +1322,15 @@ async function referenciaNota(ctx, tipo, rutPropio) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaOriginal))
     throw new ValidationError(`El documento ${tipoRef} folio ${folio} no trae fecha de emisión`);
   return { tipo: tipoRef, folio, codRef, razon, original, fecha: fechaOriginal };
+}
+async function leerDocumento(ctx, rutPropio, tipo, folio) {
+  try {
+    return await ctx.client.get(`/document/${rutPropio}/${tipo}/${folio}/json`);
+  } catch (e) {
+    if (!(e instanceof ApiError))
+      throw e;
+    throw new ApiError(`No se pudo leer el documento ${tipo} folio ${folio}: ${e.message}`, e.status, e.code, e.details);
+  }
 }
 function receptorDeNota(ctx, ref, email) {
   const original = { ...ref.original.Encabezado.Receptor ?? {} };
@@ -1349,7 +1365,7 @@ async function referenciasLibres(ctx, rutPropio) {
     if (!fechaRef) {
       if (!tributario)
         throw new UsageError(`--ref ${ref}: un documento tipo ${tipo} necesita la fecha, ej. ${tipo}:${folio}:AAAA-MM-DD`);
-      const r = await ctx.client.get(`/document/${rutPropio}/${tipo}/${folio}/json`);
+      const r = await leerDocumento(ctx, rutPropio, tipo, folio);
       fechaRef = r?.json?.Encabezado?.IdDoc?.FchEmis;
       if (!fechaRef)
         throw new ValidationError(`No se encontró el documento ${tipo} folio ${folio}. Pasa la fecha: ${tipo}:${folio}:AAAA-MM-DD`);
@@ -1807,6 +1823,7 @@ Envío:
 var EMISION = [
   {
     nombre: "emitir",
+    minArgs: 1,
     maxArgs: 2,
     resumen: "Emite factura, boleta, notas, guía o un DTE desde archivo (en seco sin --confirmar)",
     uso: USO,
@@ -2194,14 +2211,17 @@ async function run(argv, env, io) {
     if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0 || timeout > 2147483647)) {
       throw new UsageError("--timeout debe ser un número de milisegundos, de 1 a 2147483647");
     }
+    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
+      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
+    }
+    if (comando.minArgs !== undefined && positionals.length < comando.minArgs) {
+      throw new UsageError(`Faltan argumentos. Uso: ${comando.uso}`);
+    }
     let config = undefined;
     let client = undefined;
     if (!comando.sinClave) {
       config = resolveConfig({ apiKey: values["api-key"], dev: values.dev, timeoutMs: timeout }, env);
       client = new OpenFacturaClient(config);
-    }
-    if (comando.maxArgs !== undefined && positionals.length > comando.maxArgs) {
-      throw new UsageError(`Sobran argumentos: ${positionals.slice(comando.maxArgs).join(" ")}. Mira openfactura ${comando.nombre} --help`);
     }
     const resultado = await comando.run({ client, config, flags: values, args: positionals, io, env });
     if (resultado !== undefined)

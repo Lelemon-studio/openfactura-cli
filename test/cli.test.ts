@@ -75,3 +75,19 @@ describe("cli", () => {
     expect(JSON.parse(c.err.join(""))).toMatchObject({ code: "USAGE" });
   });
 });
+
+describe("errores de uso antes de pedir la clave", () => {
+  for (const argv of [["emitir"], ["contribuyente"], ["documento"], ["acusar", "33"], ["ventas"], ["sincronizar-rcv", "ventas"], ["anular-guia"]]) {
+    test(`${argv.join(" ")} sin clave avisa lo que falta, no la clave`, async () => {
+      const c = capturar();
+      expect(await run(argv, {}, c.io)).toBe(2);
+      expect(JSON.parse(c.err.join(""))).toMatchObject({ code: "USAGE" });
+    });
+  }
+
+  test("argumentos de más sin clave también es de uso", async () => {
+    const c = capturar();
+    expect(await run(["emisor", "sobra"], {}, c.io)).toBe(2);
+    expect(JSON.parse(c.err.join(""))).toMatchObject({ code: "USAGE" });
+  });
+});

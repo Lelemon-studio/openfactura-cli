@@ -194,6 +194,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "contribuyente",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Ficha del SII de cualquier RUT: razón social, giro, dirección y sucursales",
     uso: [
@@ -218,6 +219,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "documento",
+    minArgs: 1,
     maxArgs: 3,
     resumen: "Estado ante el SII, JSON, XML, PDF o copia cedible de un documento",
     uso: [
@@ -294,6 +296,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "acusar",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Acepta o reclama un documento recibido ante el SII (pide --confirmar)",
     uso: [
@@ -321,6 +324,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "ventas",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de ventas de un mes o un día, por tipo de documento",
     uso: "openfactura ventas <AAAA-MM | AAAA-MM-DD>",
@@ -328,6 +332,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "compras",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de compras de un mes o un día, separado por estado",
     uso: [
@@ -350,6 +355,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "sincronizar-rcv",
+    minArgs: 2,
     maxArgs: 2,
     resumen: "Pide a OpenFactura traer del SII el registro de compras o ventas de un mes",
     uso: [
@@ -368,6 +374,7 @@ export const LECTURAS: Comando[] = [
   },
   {
     nombre: "anular-guia",
+    minArgs: 1,
     maxArgs: 1,
     resumen: "Anula una guía de despacho (52) ante el SII (pide --confirmar)",
     uso: [

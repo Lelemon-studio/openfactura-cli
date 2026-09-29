@@ -267,3 +267,17 @@ describe("formato del SII", () => {
     expect(r.err.error).toContain("CmnaRecep");
   });
 });
+
+describe("errores de la API con contexto", () => {
+  test("si falla la lectura del documento referenciado, el error dice cuál era", async () => {
+    const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:777", "--anula", ...HOY);
+    expect(r.codigo).toBe(1);
+    expect(r.err.error).toContain("33 folio 777");
+  });
+
+  test("lo mismo con una --ref sin fecha", async () => {
+    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--ref", "52:123", ...HOY);
+    expect(r.codigo).toBe(1);
+    expect(r.err.error).toContain("52 folio 123");
+  });
+});

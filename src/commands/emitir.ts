@@ -177,7 +177,7 @@ async function referenciaNota(ctx: Contexto, tipo: Tipo, rutPropio: string): Pro
     throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${MAX_NMB_ITEM} caracteres`);
   }
 
-  const r = (await ctx.client.get(`/document/${rutPropio}/${tipoRef}/${folio}/json`)) as Obj | null;
+  const r = await leerDocumento(ctx, rutPropio, tipoRef, folio);
   const original = r?.json;
   if (!original?.Encabezado) throw new ValidationError(`No se pudo leer el documento ${tipoRef} folio ${folio} para referenciarlo`);
   const emisorOriginal = original.Encabezado.Emisor?.RUTEmisor;
@@ -190,6 +190,15 @@ async function referenciaNota(ctx: Contexto, tipo: Tipo, rutPropio: string): Pro
   const fechaOriginal = String(original.Encabezado.IdDoc?.FchEmis ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaOriginal)) throw new ValidationError(`El documento ${tipoRef} folio ${folio} no trae fecha de emisión`);
   return { tipo: tipoRef, folio, codRef, razon, original, fecha: fechaOriginal };
+}
+
+async function leerDocumento(ctx: Contexto, rutPropio: string, tipo: number, folio: number | string): Promise<Obj | null> {
+  try {
+    return (await ctx.client.get(`/document/${rutPropio}/${tipo}/${folio}/json`)) as Obj | null;
+  } catch (e) {
+    if (!(e instanceof ApiError)) throw e;
+    throw new ApiError(`No se pudo leer el documento ${tipo} folio ${folio}: ${e.message}`, e.status, e.code, e.details);
+  }
 }
 
 function receptorDeNota(ctx: Contexto, ref: Referencia, email: string | undefined): Obj {
@@ -225,7 +234,7 @@ async function referenciasLibres(ctx: Contexto, rutPropio: string): Promise<Obj[
     let fechaRef = m[3];
     if (!fechaRef) {
       if (!tributario) throw new UsageError(`--ref ${ref}: un documento tipo ${tipo} necesita la fecha, ej. ${tipo}:${folio}:AAAA-MM-DD`);
-      const r = (await ctx.client.get(`/document/${rutPropio}/${tipo}/${folio}/json`)) as Obj | null;
+      const r = await leerDocumento(ctx, rutPropio, tipo, folio);
       fechaRef = r?.json?.Encabezado?.IdDoc?.FchEmis;
       if (!fechaRef) throw new ValidationError(`No se encontró el documento ${tipo} folio ${folio}. Pasa la fecha: ${tipo}:${folio}:AAAA-MM-DD`);
     }
@@ -698,6 +707,7 @@ Envío:
 export const EMISION: Comando[] = [
   {
     nombre: "emitir",
+    minArgs: 1,
     maxArgs: 2,
     resumen: "Emite factura, boleta, notas, guía o un DTE desde archivo (en seco sin --confirmar)",
     uso: USO,
