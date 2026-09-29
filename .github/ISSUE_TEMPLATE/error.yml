@@ -1,0 +1,45 @@
+name: Algo no funciona
+description: Un comando falla, da un resultado incorrecto o el SII rechaza lo que armó el CLI
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **No pegues tu API key ni datos de tus clientes** (RUT, nombres, montos reales). Si el caso los
+        necesita, reemplázalos por otros inventados. Si es una vulnerabilidad, repórtala en privado desde
+        la pestaña Security.
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      description: La salida de `openfactura --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: ambiente
+    attributes:
+      label: Ambiente
+      options: [Pruebas (--dev), Producción]
+    validations:
+      required: true
+  - type: textarea
+    id: comando
+    attributes:
+      label: Comando
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: salida
+    attributes:
+      label: Qué salió
+      description: El JSON de la salida o del error, con su `code`
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Qué esperabas
+    validations:
+      required: true
