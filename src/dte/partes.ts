@@ -1,5 +1,5 @@
 import { ValidationError } from "../command.ts";
-import { LARGOS } from "./esquema.ts";
+import { largoMaximo } from "./esquema.ts";
 
 export const MAX_GIRO_RECEPTOR = 40;
 export const RECEPTOR_CONSUMIDOR_FINAL = {
@@ -26,7 +26,7 @@ const NOMBRES: Record<string, string> = {
 };
 
 function delSii(campo: string, valor: string, avisos: string[]): string {
-  const limite = LARGOS[campo];
+  const limite = largoMaximo(campo);
   if (limite === undefined || valor.length <= limite) return valor;
   avisos.push(`El SII trae ${NOMBRES[campo] ?? campo} con ${valor.length} caracteres; se recortó a ${limite}, que es lo que admite el formato del SII`);
   return valor.slice(0, limite).trim();
@@ -95,7 +95,7 @@ export function receptorDesdeFicha(rut: string, ficha: Obj, manual: DatosRecepto
     let giro = manual.giro ?? limpio(principal(ficha)?.giro);
     if (!giro) {
       throw new ValidationError(
-        `${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. ` + "Si sabes que sí tiene giro, pásalo con --giro",
+        `${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. Si sabes que sí tiene giro, pásalo con --giro`,
       );
     }
     if (giro.length > MAX_GIRO_RECEPTOR) {

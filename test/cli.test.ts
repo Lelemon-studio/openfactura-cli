@@ -97,3 +97,41 @@ test("--version es la versión de package.json", async () => {
   expect(await run(["--version"], ENV, c.io)).toBe(0);
   expect(c.out.join("").trim()).toBe(pkg.version);
 });
+
+describe("atajos de ayuda", () => {
+  test("-v también muestra la versión", async () => {
+    const c = capturar();
+    expect(await run(["-v"], ENV, c.io)).toBe(0);
+    expect(c.out.join("").trim()).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  test("help sin nada muestra la ayuda general", async () => {
+    const c = capturar();
+    expect(await run(["help"], ENV, c.io)).toBe(0);
+    expect(c.out.join("\n")).toContain("Uso:");
+  });
+
+  test("help <comando> muestra la ayuda de ese comando", async () => {
+    const c = capturar();
+    expect(await run(["help", "folios"], ENV, c.io)).toBe(0);
+    expect(c.out.join("\n")).toContain("openfactura folios");
+  });
+});
+
+describe("errores de opciones en español", () => {
+  const casos: Array<[string[], RegExp]> = [
+    [["emitidos", "--nada"], /La opción --nada no existe/],
+    [["emitidos", "--desde"], /--desde necesita un valor/],
+    [["emitidos", "--todas=si"], /--todas no lleva valor/],
+  ];
+  for (const [argv, esperado] of casos) {
+    test(argv.join(" "), async () => {
+      const c = capturar();
+      expect(await run(argv, ENV, c.io)).toBe(2);
+      const e = JSON.parse(c.err.join(""));
+      expect(e.code).toBe("USAGE");
+      expect(e.error).toMatch(esperado);
+      expect(e.error).toContain("openfactura emitidos --help");
+    });
+  }
+});

@@ -233,6 +233,11 @@ function arg(ctx, i, nombre) {
     throw new UsageError(`Falta el argumento <${nombre}>`);
   return v;
 }
+function entero(valor, nombre) {
+  if (valor === undefined || !/^\d+$/.test(valor.trim()))
+    throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
+  return Number(valor);
+}
 
 // src/commands/lecturas.ts
 import { existsSync, writeFileSync } from "node:fs";
@@ -301,11 +306,6 @@ function rutCuerpo(entrada) {
 
 // src/commands/lecturas.ts
 var MAX_PAGINAS = 500;
-function entero(valor, nombre) {
-  if (valor === undefined || !/^\d+$/.test(valor.trim()))
-    throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
-  return Number(valor);
-}
 async function rutEmisor(ctx) {
   const dado = texto(ctx.flags, "rut");
   if (dado)
@@ -475,7 +475,7 @@ var LECTURAS = [
   {
     nombre: "folios",
     maxArgs: 0,
-    resumen: "Tipos de documento autorizados y folios disponibles",
+    resumen: "Tipos de documento autorizados (el contador de folios no es confiable)",
     uso: [
       "openfactura folios",
       "",
@@ -704,93 +704,6 @@ import { createHash } from "node:crypto";
 import { existsSync as existsSync2, readFileSync, statSync, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-// src/dte/items.ts
-var MAX_NOMBRE_ITEM = 80;
-var MAX_DECIMALES = 6;
-var MAX_MONTO = 999999999999;
-var GUIONES_LARGOS = /[‒–—―−]/g;
-var CAMPOS_JSON = new Set(["nombre", "cantidad", "precio", "exento", "descripcion"]);
-var FORMATO = 'Cada --item va como "nombre|cantidad|precio" (agrega "|exento" si corresponde) o como JSON: ' + '{"nombre":"...","cantidad":1,"precio":1000,"exento":false,"descripcion":"..."}';
-function numeroEstricto(valor, campo, prefijo) {
-  let n;
-  if (typeof valor === "number") {
-    n = valor;
-  } else if (typeof valor === "string") {
-    const t = valor.trim();
-    if (/^[1-9]\d{0,2}([.,]\d{3})+$/.test(t)) {
-      throw new ValidationError(`${prefijo}: ${campo} "${valor}" es ambiguo. Escribe el número sin separador de miles: ${t.replace(/[.,]/g, "")}`);
-    }
-    if (!/^\d+([.,]\d+)?$/.test(t))
-      throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número. ${FORMATO}`);
-    n = Number(t.replace(",", "."));
-  } else {
-    throw new ValidationError(`${prefijo}: falta ${campo}. ${FORMATO}`);
-  }
-  if (!Number.isFinite(n) || n < 0)
-    throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número válido`);
-  const decimales = (String(n).split(".")[1] ?? "").length;
-  if (decimales > MAX_DECIMALES || String(n).includes("e")) {
-    throw new ValidationError(`${prefijo}: ${campo} admite hasta ${MAX_DECIMALES} decimales y un tamaño razonable`);
-  }
-  if (n > MAX_MONTO)
-    throw new ValidationError(`${prefijo}: ${campo} ${valor} es demasiado grande`);
-  return n;
-}
-function limpiarNombre(nombre, i, avisos) {
-  const sinGuiones = nombre.replace(GUIONES_LARGOS, "-");
-  if (sinGuiones !== nombre)
-    avisos.push(`Ítem ${i}: se cambió el guion largo por uno corto, porque OpenFactura lo borra`);
-  const limpio = sinGuiones.replace(/\s{2,}/g, " ").trim();
-  if (!limpio)
-    throw new ValidationError(`Ítem ${i}: falta el nombre. ${FORMATO}`);
-  if (limpio.length > MAX_NOMBRE_ITEM) {
-    throw new ValidationError(`Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${MAX_NOMBRE_ITEM}. Pon el detalle en "descripcion"`);
-  }
-  return limpio;
-}
-function parsearItem(texto2, i, avisos) {
-  const t = texto2.trim();
-  const prefijo = `Ítem ${i}`;
-  if (t.startsWith("{")) {
-    let o;
-    try {
-      o = JSON.parse(t);
-    } catch {
-      throw new ValidationError(`${prefijo}: el JSON no es válido. ${FORMATO}`);
-    }
-    const desconocidos = Object.keys(o).filter((k) => !CAMPOS_JSON.has(k));
-    if (desconocidos.length) {
-      throw new ValidationError(`${prefijo}: campos desconocidos ${desconocidos.join(", ")}. Los válidos son ${[...CAMPOS_JSON].join(", ")}`);
-    }
-    if (o.exento !== undefined && typeof o.exento !== "boolean")
-      throw new ValidationError(`${prefijo}: "exento" debe ser true o false, sin comillas`);
-    if (o.descripcion !== undefined && typeof o.descripcion !== "string")
-      throw new ValidationError(`${prefijo}: "descripcion" debe ser texto`);
-    const linea = {
-      nombre: limpiarNombre(String(o.nombre ?? ""), i, avisos),
-      cantidad: numeroEstricto(o.cantidad ?? 1, "la cantidad", prefijo),
-      precio: numeroEstricto(o.precio, "el precio", prefijo),
-      exento: o.exento === true
-    };
-    if (typeof o.descripcion === "string" && o.descripcion.trim())
-      linea.descripcion = o.descripcion.trim();
-    return linea;
-  }
-  const partes = t.split("|").map((p) => p.trim());
-  if (partes.length < 3 || partes.length > 4)
-    throw new ValidationError(`${prefijo}: "${texto2}" no tiene el formato esperado. ${FORMATO}`);
-  const [nombre, cantidad, precio, marca] = partes;
-  if (marca !== undefined && marca.toLowerCase() !== "exento") {
-    throw new ValidationError(`${prefijo}: el cuarto campo sólo puede ser "exento". ${FORMATO}`);
-  }
-  return {
-    nombre: limpiarNombre(nombre, i, avisos),
-    cantidad: numeroEstricto(cantidad, "la cantidad", prefijo),
-    precio: numeroEstricto(precio, "el precio", prefijo),
-    exento: marca !== undefined
-  };
-}
-
 // src/dte/esquema.ts
 var ORDEN_DTE = {
   Documento: ["Encabezado", "Detalle", "SubTotInfo", "DscRcgGlobal", "Referencia", "GeoRefEmision", "ManejoMadera", "Comisiones"],
@@ -971,6 +884,9 @@ var LARGOS = {
   DirDest: 70,
   CmnaDest: 20
 };
+function largoMaximo(campo) {
+  return LARGOS[campo];
+}
 var MAX_LINEAS = { dte: 60, boleta: 1000 };
 var MAX_REFERENCIAS = 40;
 function ordenar(valor, seccion, orden) {
@@ -999,7 +915,7 @@ function revisarLargos(valor, ruta, errores) {
   if (!valor || typeof valor !== "object")
     return;
   for (const [k, v] of Object.entries(valor)) {
-    const limite2 = LARGOS[k];
+    const limite2 = largoMaximo(k);
     if (limite2 !== undefined && typeof v === "string" && v.length > limite2) {
       errores.push(`${ruta}.${k} tiene ${v.length} caracteres y el SII admite ${limite2}`);
     } else if (limite2 !== undefined && typeof v === "number" && String(v).length > limite2) {
@@ -1020,6 +936,92 @@ function validarContraEsquema(dte, esBoleta) {
   revisarLargos(dte, "dte", errores);
   if (errores.length)
     throw new ValidationError(`El documento no cumple el formato del SII: ${errores.join("; ")}`, errores);
+}
+
+// src/dte/items.ts
+var MAX_DECIMALES = 6;
+var MAX_MONTO = 999999999999;
+var GUIONES_LARGOS = /[‒–—―−]/g;
+var CAMPOS_JSON = new Set(["nombre", "cantidad", "precio", "exento", "descripcion"]);
+var FORMATO = 'Cada --item va como "nombre|cantidad|precio" (agrega "|exento" si corresponde) o como JSON: ' + '{"nombre":"...","cantidad":1,"precio":1000,"exento":false,"descripcion":"..."}';
+function numeroEstricto(valor, campo, prefijo) {
+  let n;
+  if (typeof valor === "number") {
+    n = valor;
+  } else if (typeof valor === "string") {
+    const t = valor.trim();
+    if (/^[1-9]\d{0,2}([.,]\d{3})+$/.test(t)) {
+      throw new ValidationError(`${prefijo}: ${campo} "${valor}" es ambiguo. Escribe el número sin separador de miles: ${t.replace(/[.,]/g, "")}`);
+    }
+    if (!/^\d+([.,]\d+)?$/.test(t))
+      throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número. ${FORMATO}`);
+    n = Number(t.replace(",", "."));
+  } else {
+    throw new ValidationError(`${prefijo}: falta ${campo}. ${FORMATO}`);
+  }
+  if (!Number.isFinite(n) || n < 0)
+    throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número válido`);
+  const decimales = (String(n).split(".")[1] ?? "").length;
+  if (decimales > MAX_DECIMALES || String(n).includes("e")) {
+    throw new ValidationError(`${prefijo}: ${campo} admite hasta ${MAX_DECIMALES} decimales y un tamaño razonable`);
+  }
+  if (n > MAX_MONTO)
+    throw new ValidationError(`${prefijo}: ${campo} ${valor} es demasiado grande`);
+  return n;
+}
+function limpiarNombre(nombre, i, avisos) {
+  const sinGuiones = nombre.replace(GUIONES_LARGOS, "-");
+  if (sinGuiones !== nombre)
+    avisos.push(`Ítem ${i}: se cambió el guion largo por uno corto, porque OpenFactura lo borra`);
+  const limpio = sinGuiones.replace(/\s{2,}/g, " ").trim();
+  if (!limpio)
+    throw new ValidationError(`Ítem ${i}: falta el nombre. ${FORMATO}`);
+  if (limpio.length > LARGOS.NmbItem) {
+    throw new ValidationError(`Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${LARGOS.NmbItem}. Pon el detalle en "descripcion"`);
+  }
+  return limpio;
+}
+function parsearItem(texto2, i, avisos) {
+  const t = texto2.trim();
+  const prefijo = `Ítem ${i}`;
+  if (t.startsWith("{")) {
+    let o;
+    try {
+      o = JSON.parse(t);
+    } catch {
+      throw new ValidationError(`${prefijo}: el JSON no es válido. ${FORMATO}`);
+    }
+    const desconocidos = Object.keys(o).filter((k) => !CAMPOS_JSON.has(k));
+    if (desconocidos.length) {
+      throw new ValidationError(`${prefijo}: campos desconocidos ${desconocidos.join(", ")}. Los válidos son ${[...CAMPOS_JSON].join(", ")}`);
+    }
+    if (o.exento !== undefined && typeof o.exento !== "boolean")
+      throw new ValidationError(`${prefijo}: "exento" debe ser true o false, sin comillas`);
+    if (o.descripcion !== undefined && typeof o.descripcion !== "string")
+      throw new ValidationError(`${prefijo}: "descripcion" debe ser texto`);
+    const linea = {
+      nombre: limpiarNombre(String(o.nombre ?? ""), i, avisos),
+      cantidad: numeroEstricto(o.cantidad ?? 1, "la cantidad", prefijo),
+      precio: numeroEstricto(o.precio, "el precio", prefijo),
+      exento: o.exento === true
+    };
+    if (typeof o.descripcion === "string" && o.descripcion.trim())
+      linea.descripcion = o.descripcion.trim();
+    return linea;
+  }
+  const partes = t.split("|").map((p) => p.trim());
+  if (partes.length < 3 || partes.length > 4)
+    throw new ValidationError(`${prefijo}: "${texto2}" no tiene el formato esperado. ${FORMATO}`);
+  const [nombre, cantidad, precio, marca] = partes;
+  if (marca !== undefined && marca.toLowerCase() !== "exento") {
+    throw new ValidationError(`${prefijo}: el cuarto campo sólo puede ser "exento". ${FORMATO}`);
+  }
+  return {
+    nombre: limpiarNombre(nombre, i, avisos),
+    cantidad: numeroEstricto(cantidad, "la cantidad", prefijo),
+    precio: numeroEstricto(precio, "el precio", prefijo),
+    exento: marca !== undefined
+  };
 }
 
 // src/dte/partes.ts
@@ -1043,7 +1045,7 @@ var NOMBRES = {
   CmnaRecep: "la comuna del receptor"
 };
 function delSii(campo, valor, avisos) {
-  const limite2 = LARGOS[campo];
+  const limite2 = largoMaximo(campo);
   if (limite2 === undefined || valor.length <= limite2)
     return valor;
   avisos.push(`El SII trae ${NOMBRES[campo] ?? campo} con ${valor.length} caracteres; se recortó a ${limite2}, que es lo que admite el formato del SII`);
@@ -1087,7 +1089,7 @@ function receptorDesdeFicha(rut, ficha, manual, esBoleta, avisos) {
   if (!esBoleta) {
     let giro = manual.giro ?? limpio(principal(ficha)?.giro);
     if (!giro) {
-      throw new ValidationError(`${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. ` + "Si sabes que sí tiene giro, pásalo con --giro");
+      throw new ValidationError(`${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. Si sabes que sí tiene giro, pásalo con --giro`);
     }
     if (giro.length > MAX_GIRO_RECEPTOR) {
       avisos.push(`El giro del receptor se recortó a ${MAX_GIRO_RECEPTOR} caracteres, que es lo que admite el SII`);
@@ -1196,8 +1198,6 @@ var CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 var VIGENCIA_RES_154 = "2026-11-01";
 var UMBRAL_BOLETA_IDENTIFICADA = 5000000;
 var MESES_PLAZO_REBAJA = 6;
-var MAX_NMB_ITEM = 80;
-var MAX_RAZON_REF = 90;
 var MAX_ESPERA_S = 3600;
 var MAX_PAGINAS_NOTAS = 10;
 function opcion(mapa, valor, flag) {
@@ -1301,10 +1301,10 @@ async function referenciaNota(ctx, tipo, rutPropio) {
   if (codRef === 2 && !razonDada)
     throw new UsageError("--corrige-texto necesita --razon con la corrección");
   const razon = razonDada ?? (codRef === 1 ? "Anula documento" : "Corrige montos");
-  if (razon.length > MAX_RAZON_REF)
-    throw new ValidationError(`--razon tiene ${razon.length} caracteres y el máximo es ${MAX_RAZON_REF}`);
-  if (codRef === 2 && razon.length > MAX_NMB_ITEM) {
-    throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${MAX_NMB_ITEM} caracteres`);
+  if (razon.length > LARGOS.RazonRef)
+    throw new ValidationError(`--razon tiene ${razon.length} caracteres y el máximo es ${LARGOS.RazonRef}`);
+  if (codRef === 2 && razon.length > LARGOS.NmbItem) {
+    throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${LARGOS.NmbItem} caracteres`);
   }
   const r = await leerDocumento(ctx, rutPropio, tipoRef, folio);
   const original = r?.json;
@@ -1928,7 +1928,7 @@ openfactura emitir factura --receptor 76.430.498-5 --item "Plan mensual|1|69000"
 openfactura emitir factura --receptor 76430498-5 --item "Plan anual|1|177310" --con-iva
 
 # Varias líneas y envío del documento por correo cuando el SII lo acepte
-openfactura emitir factura --receptor 76430498-5 --item "Producto|2|10000" --item "Despacho|1|3000" --correo pagos@cliente.cl
+openfactura emitir factura --receptor 76430498-5 --item "Producto|2|10000" --item "Despacho|1|3000" --correo pagos@example.com
 
 # Factura que cita la guía de despacho y la orden de compra del cliente
 openfactura emitir factura --receptor 76430498-5 --item "Producto|10|5000" --ref 52:123 --ref 801:OC-55:2026-09-01
@@ -2034,6 +2034,7 @@ openfactura recibidos --desde 2026-09-01 --todas
 
 openfactura ventas 2026-09                    # resumen del mes por tipo de documento
 openfactura compras 2026-09 --estado pendiente
+openfactura sincronizar-rcv ventas 2026-09   # pide a OpenFactura traer el RCV del SII, si ventas o compras vienen atrasados
 openfactura contribuyente 76.430.498-5        # ficha SII de un RUT
 openfactura folios                            # tipos de documento autorizados
 \`\`\`
@@ -2190,8 +2191,8 @@ function ayudaGeneral() {
     "  --api-key <clave>  API key (o variable OPENFACTURA_API_KEY)",
     "  --dev              Usa el ambiente de pruebas dev-api.haulmer.com (o OPENFACTURA_ENV=dev)",
     "  --timeout <ms>     Tiempo máximo por llamada (default 60000)",
-    "  -h, --help         Ayuda general o de un comando",
-    "  --version          Versión",
+    "  -h, --help         Ayuda general o de un comando (también: openfactura help <comando>)",
+    "  -v, --version      Versión",
     "",
     "La salida es JSON en stdout. Los errores salen como JSON en stderr, con código 1 si los",
     "rechazó OpenFactura y 2 si el problema está en los argumentos o la configuración."
@@ -2211,12 +2212,24 @@ function buscarComando(posicionales) {
   }
   return null;
 }
+function opcionInvalida(mensaje, code) {
+  const opcion2 = /'(-[^' ]+)/.exec(mensaje)?.[1];
+  if (!opcion2)
+    return mensaje;
+  if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION")
+    return `La opción ${opcion2} no existe`;
+  if (/does not take an argument/.test(mensaje))
+    return `${opcion2} no lleva valor`;
+  if (/argument missing/.test(mensaje))
+    return `${opcion2} necesita un valor`;
+  return mensaje;
+}
 function error(io, cuerpo, codigo) {
   io.err(JSON.stringify(cuerpo, null, 2));
   return codigo;
 }
 async function run(argv, env, io) {
-  if (argv[0] === "--version") {
+  if (argv[0] === "--version" || argv[0] === "-v") {
     io.out(VERSION);
     return 0;
   }
@@ -2240,6 +2253,13 @@ async function run(argv, env, io) {
     i++;
   }
   argv = argv.slice(i);
+  if (argv[0] === "help") {
+    if (argv.length === 1) {
+      io.out(ayudaGeneral());
+      return 0;
+    }
+    argv = [...argv.slice(1), "--help"];
+  }
   if (argv.length === 0) {
     io.out(ayudaGeneral());
     return 0;
@@ -2299,7 +2319,7 @@ async function run(argv, env, io) {
     }
     const nodeCode = sistema.code;
     if (typeof nodeCode === "string" && nodeCode.startsWith("ERR_PARSE_ARGS")) {
-      return error(io, { error: e.message, code: "USAGE" }, 2);
+      return error(io, { error: `${opcionInvalida(e.message, nodeCode)}. Mira openfactura ${comando.nombre} --help`, code: "USAGE" }, 2);
     }
     return error(io, { error: String(e?.message ?? e), code: "INTERNAL" }, 1);
   }

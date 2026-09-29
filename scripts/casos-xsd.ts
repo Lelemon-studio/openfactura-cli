@@ -71,7 +71,7 @@ export const CASOS: Record<string, string[]> = {
     "--forma-pago",
     "credito",
     "--correo",
-    "pagos@hosty.cl",
+    "pagos@example.com",
     "--contacto",
     "Juan",
   ],

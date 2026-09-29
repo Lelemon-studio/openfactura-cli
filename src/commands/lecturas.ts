@@ -1,15 +1,10 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { ApiError } from "../client.ts";
-import { type Comando, type Contexto, type Flags, UsageError, arg, requerido, texto } from "../command.ts";
+import { type Comando, type Contexto, type Flags, UsageError, arg, entero, requerido, texto } from "../command.ts";
 import { fecha, periodo, rutaPeriodo } from "../fechas.ts";
 import { normalizarRut, rutCuerpo } from "../rut.ts";
 
 const MAX_PAGINAS = 500;
-
-export function entero(valor: string | undefined, nombre: string): number {
-  if (valor === undefined || !/^\d+$/.test(valor.trim())) throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
-  return Number(valor);
-}
 
 export async function rutEmisor(ctx: Contexto): Promise<string> {
   const dado = texto(ctx.flags, "rut");
@@ -183,7 +178,7 @@ export const LECTURAS: Comando[] = [
   {
     nombre: "folios",
     maxArgs: 0,
-    resumen: "Tipos de documento autorizados y folios disponibles",
+    resumen: "Tipos de documento autorizados (el contador de folios no es confiable)",
     uso: [
       "openfactura folios",
       "",

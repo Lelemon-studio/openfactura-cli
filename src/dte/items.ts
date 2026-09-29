@@ -1,7 +1,7 @@
 import { ValidationError } from "../command.ts";
+import { LARGOS } from "./esquema.ts";
 import type { Linea } from "./totales.ts";
 
-export const MAX_NOMBRE_ITEM = 80;
 export const MAX_DECIMALES = 6;
 export const MAX_MONTO = 999_999_999_999;
 const GUIONES_LARGOS = /[‒–—―−]/g;
@@ -39,8 +39,8 @@ function limpiarNombre(nombre: string, i: number, avisos: string[]): string {
   if (sinGuiones !== nombre) avisos.push(`Ítem ${i}: se cambió el guion largo por uno corto, porque OpenFactura lo borra`);
   const limpio = sinGuiones.replace(/\s{2,}/g, " ").trim();
   if (!limpio) throw new ValidationError(`Ítem ${i}: falta el nombre. ${FORMATO}`);
-  if (limpio.length > MAX_NOMBRE_ITEM) {
-    throw new ValidationError(`Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${MAX_NOMBRE_ITEM}. Pon el detalle en "descripcion"`);
+  if (limpio.length > LARGOS.NmbItem) {
+    throw new ValidationError(`Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${LARGOS.NmbItem}. Pon el detalle en "descripcion"`);
   }
   return limpio;
 }

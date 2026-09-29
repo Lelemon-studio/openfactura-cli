@@ -166,14 +166,14 @@ describe("factura", () => {
 
   test("--correo agrega CorreoRecep y el envío por correo tras la aceptación", async () => {
     responde("POST /document", { status: 200, body: { TOKEN: "t", FOLIO: 2 } });
-    await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos@hosty.cl", ...FECHA, "--confirmar");
+    await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos@example.com", ...FECHA, "--confirmar");
     const e = emisiones()[0]!;
-    expect(e.body.dte.Encabezado.Receptor.CorreoRecep).toBe("pagos@hosty.cl");
-    expect(e.body.sendEmail).toEqual({ to: "pagos@hosty.cl" });
+    expect(e.body.dte.Encabezado.Receptor.CorreoRecep).toBe("pagos@example.com");
+    expect(e.body.sendEmail).toEqual({ to: "pagos@example.com" });
   });
 
   test("un correo mal escrito falla", async () => {
-    expect((await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos-hosty.cl", ...FECHA)).codigo).toBe(2);
+    expect((await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000", "--correo", "pagos-example.com", ...FECHA)).codigo).toBe(2);
   });
 
   test("--con-iva desglosa el precio bruto", async () => {

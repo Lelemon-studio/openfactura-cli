@@ -2,14 +2,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { ApiError } from "../client.ts";
-import { type Comando, type Contexto, UsageError, ValidationError, arg, texto } from "../command.ts";
+import { type Comando, type Contexto, UsageError, ValidationError, arg, entero, texto } from "../command.ts";
 import { fecha, hoy } from "../fechas.ts";
 import { normalizarRut } from "../rut.ts";
 import { parsearItem } from "../dte/items.ts";
 import { emisorDesdeOrganizacion, RECEPTOR_CONSUMIDOR_FINAL, receptorDesdeFicha } from "../dte/partes.ts";
 import { calcularTotales, type Linea, type Modo, TASA_IVA } from "../dte/totales.ts";
-import { ordenarDte, validarContraEsquema } from "../dte/esquema.ts";
-import { entero } from "./lecturas.ts";
+import { LARGOS, ordenarDte, validarContraEsquema } from "../dte/esquema.ts";
 
 type Obj = Record<string, any>;
 
@@ -58,8 +57,6 @@ const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VIGENCIA_RES_154 = "2026-11-01";
 const UMBRAL_BOLETA_IDENTIFICADA = 5_000_000;
 const MESES_PLAZO_REBAJA = 6;
-const MAX_NMB_ITEM = 80;
-const MAX_RAZON_REF = 90;
 const MAX_ESPERA_S = 3600;
 const MAX_PAGINAS_NOTAS = 10;
 
@@ -172,9 +169,9 @@ async function referenciaNota(ctx: Contexto, tipo: Tipo, rutPropio: string): Pro
   const razonDada = texto(ctx.flags, "razon");
   if (codRef === 2 && !razonDada) throw new UsageError("--corrige-texto necesita --razon con la corrección");
   const razon = razonDada ?? (codRef === 1 ? "Anula documento" : "Corrige montos");
-  if (razon.length > MAX_RAZON_REF) throw new ValidationError(`--razon tiene ${razon.length} caracteres y el máximo es ${MAX_RAZON_REF}`);
-  if (codRef === 2 && razon.length > MAX_NMB_ITEM) {
-    throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${MAX_NMB_ITEM} caracteres`);
+  if (razon.length > LARGOS.RazonRef) throw new ValidationError(`--razon tiene ${razon.length} caracteres y el máximo es ${LARGOS.RazonRef}`);
+  if (codRef === 2 && razon.length > LARGOS.NmbItem) {
+    throw new ValidationError(`Con --corrige-texto la razón va también como línea del detalle, que admite ${LARGOS.NmbItem} caracteres`);
   }
 
   const r = await leerDocumento(ctx, rutPropio, tipoRef, folio);

@@ -27,8 +27,8 @@ function ayudaGeneral(): string {
     "  --api-key <clave>  API key (o variable OPENFACTURA_API_KEY)",
     "  --dev              Usa el ambiente de pruebas dev-api.haulmer.com (o OPENFACTURA_ENV=dev)",
     "  --timeout <ms>     Tiempo máximo por llamada (default 60000)",
-    "  -h, --help         Ayuda general o de un comando",
-    "  --version          Versión",
+    "  -h, --help         Ayuda general o de un comando (también: openfactura help <comando>)",
+    "  -v, --version      Versión",
     "",
     "La salida es JSON en stdout. Los errores salen como JSON en stderr, con código 1 si los",
     "rechazó OpenFactura y 2 si el problema está en los argumentos o la configuración.",
@@ -48,13 +48,22 @@ function buscarComando(posicionales: string[]): { comando: Comando; resto: strin
   return null;
 }
 
+function opcionInvalida(mensaje: string, code: string): string {
+  const opcion = /'(-[^' ]+)/.exec(mensaje)?.[1];
+  if (!opcion) return mensaje;
+  if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") return `La opción ${opcion} no existe`;
+  if (/does not take an argument/.test(mensaje)) return `${opcion} no lleva valor`;
+  if (/argument missing/.test(mensaje)) return `${opcion} necesita un valor`;
+  return mensaje;
+}
+
 function error(io: IO, cuerpo: Record<string, unknown>, codigo: number): number {
   io.err(JSON.stringify(cuerpo, null, 2));
   return codigo;
 }
 
 export async function run(argv: string[], env: Record<string, string | undefined>, io: IO): Promise<number> {
-  if (argv[0] === "--version") {
+  if (argv[0] === "--version" || argv[0] === "-v") {
     io.out(VERSION);
     return 0;
   }
@@ -79,6 +88,13 @@ export async function run(argv: string[], env: Record<string, string | undefined
   }
   argv = argv.slice(i);
 
+  if (argv[0] === "help") {
+    if (argv.length === 1) {
+      io.out(ayudaGeneral());
+      return 0;
+    }
+    argv = [...argv.slice(1), "--help"];
+  }
   if (argv.length === 0) {
     io.out(ayudaGeneral());
     return 0;
@@ -140,7 +156,7 @@ export async function run(argv: string[], env: Record<string, string | undefined
     }
     const nodeCode = sistema.code;
     if (typeof nodeCode === "string" && nodeCode.startsWith("ERR_PARSE_ARGS")) {
-      return error(io, { error: (e as Error).message, code: "USAGE" }, 2);
+      return error(io, { error: `${opcionInvalida((e as Error).message, nodeCode)}. Mira openfactura ${comando.nombre} --help`, code: "USAGE" }, 2);
     }
     return error(io, { error: String((e as Error)?.message ?? e), code: "INTERNAL" }, 1);
   }

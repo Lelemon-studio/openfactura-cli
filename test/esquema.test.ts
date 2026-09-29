@@ -10,7 +10,7 @@ describe("orden del XSD del SII", () => {
         Detalle: [{ NroLinDet: 1, NmbItem: "x", QtyItem: 1, PrcItem: 1, MontoItem: 1, IndExe: 1 }],
         Encabezado: {
           Totales: { MntTotal: 1, MntExe: 1 },
-          Receptor: { RUTRecep: "1-9", RznSocRecep: "R", DirRecep: "D", CmnaRecep: "C", CorreoRecep: "a@b.cl" },
+          Receptor: { RUTRecep: "1-9", RznSocRecep: "R", DirRecep: "D", CmnaRecep: "C", CorreoRecep: "a@example.com" },
           Emisor: { RUTEmisor: "1-9", RznSoc: "E", GiroEmis: "G", Acteco: 1, DirOrigen: "D", CmnaOrigen: "C", CdgSIISucur: "1" },
           IdDoc: { TipoDTE: 34, FchEmis: "2026-01-01", Folio: 0 },
         },

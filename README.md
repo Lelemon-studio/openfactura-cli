@@ -45,8 +45,8 @@ Para usarlo sin Node, `bun run build` compila un binario para el sistema donde l
 
 ## API key
 
-La API key la entrega OpenFactura para tu empresa: búscala en tu cuenta o pídela a su soporte. Cada
-clave opera sobre un solo emisor, y `openfactura emisor` te dice cuál. Déjala en una variable de
+La API key se genera en la plataforma de OpenFactura, con el botón "Generar API Key". Cada clave opera
+sobre un solo emisor, y `openfactura emisor` te dice cuál. Déjala en una variable de
 entorno, nunca en un archivo versionado:
 
 ```bash

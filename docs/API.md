@@ -1,12 +1,12 @@
 # OpenFactura (Haulmer): catálogo de la API REST
 
-Investigado el 2026-09-27. Sirve de base para un CLI que cubra la API entera.
+Catálogo de la API de OpenFactura que implementa este CLI, armado el 2026-09-27 con la documentación oficial y llamadas reales. Cada dato dice de dónde salió.
 
 ## Etiquetas
 
 | Etiqueta | Qué significa |
 |---|---|
-| **[verificado]** | Comprobado contra la API real por Camilo antes de esta investigación (lo entregó el encargo). No se pisa. |
+| **[verificado]** | Comprobado contra la API real de producción, con una cuenta en uso. |
 | **[verificado-dev]** | Comprobado hoy con llamadas de **solo lectura** a `https://dev-api.haulmer.com` usando la API key demo pública. No se emitió nada ni se tocó producción. |
 | **[doc]** | Aparece en la documentación oficial (colección Postman publicada en docsapi-openfactura.haulmer.com). |
 | **[SII]** | Viene del formato oficial del SII al que la doc de OpenFactura remite para los campos del DTE ("se mantienen los mismos nombres que utiliza el SII"). |

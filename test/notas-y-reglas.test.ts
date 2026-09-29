@@ -374,7 +374,19 @@ describe("formato del SII", () => {
   });
 
   test("el DTE sale en el orden del XSD", async () => {
-    const r = await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", "x|1|1000|exento", "--item", "y|1|1000", "--correo", "a@b.cl", ...HOY);
+    const r = await ejecutar(
+      "emitir",
+      "factura",
+      "--receptor",
+      "76430498-5",
+      "--item",
+      "x|1|1000|exento",
+      "--item",
+      "y|1|1000",
+      "--correo",
+      "a@example.com",
+      ...HOY,
+    );
     expect(Object.keys(r.out.dte.Encabezado.Receptor)).toEqual(["RUTRecep", "RznSocRecep", "GiroRecep", "CorreoRecep", "DirRecep", "CmnaRecep"]);
     expect(Object.keys(r.out.dte.Detalle[0])[1]).toBe("IndExe");
   });

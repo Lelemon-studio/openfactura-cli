@@ -160,7 +160,7 @@ const ORDEN_BOLETA: Record<string, string[]> = {
   Referencia: ["NroLinRef", "TpoDocRef", "FolioRef", "CodRef", "RazonRef", "CodVndor", "CodCaja"],
 };
 
-export const LARGOS: Record<string, number> = {
+export const LARGOS = {
   RznSoc: 100,
   RznSocEmisor: 100,
   GiroEmis: 80,
@@ -182,7 +182,11 @@ export const LARGOS: Record<string, number> = {
   NombreChofer: 30,
   DirDest: 70,
   CmnaDest: 20,
-};
+} satisfies Record<string, number>;
+
+export function largoMaximo(campo: string): number | undefined {
+  return (LARGOS as Record<string, number>)[campo];
+}
 
 const MAX_LINEAS = { dte: 60, boleta: 1000 };
 const MAX_REFERENCIAS = 40;
@@ -210,7 +214,7 @@ function revisarLargos(valor: unknown, ruta: string, errores: string[]) {
   }
   if (!valor || typeof valor !== "object") return;
   for (const [k, v] of Object.entries(valor as Obj)) {
-    const limite = LARGOS[k];
+    const limite = largoMaximo(k);
     if (limite !== undefined && typeof v === "string" && v.length > limite) {
       errores.push(`${ruta}.${k} tiene ${v.length} caracteres y el SII admite ${limite}`);
     } else if (limite !== undefined && typeof v === "number" && String(v).length > limite) {
