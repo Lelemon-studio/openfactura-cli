@@ -699,10 +699,141 @@ var LECTURAS = [
   }
 ];
 
-// src/commands/emitir.ts
-import { createHash } from "node:crypto";
-import { existsSync as existsSync2, readFileSync, statSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname, resolve } from "node:path";
+// src/dte/totales.ts
+var TASA_IVA = 19;
+var MAX_MONTO_DOCUMENTO = 999999999999999;
+var FACTOR = 1 + TASA_IVA / 100;
+function validar(lineas) {
+  if (lineas.length === 0)
+    throw new ValidationError("El documento necesita al menos una línea de detalle (--item)");
+  lineas.forEach((l, i) => {
+    if (!(l.cantidad > 0))
+      throw new ValidationError(`Línea ${i + 1}: la cantidad debe ser mayor que cero`);
+    if (!(l.precio >= 0) || !Number.isFinite(l.precio))
+      throw new ValidationError(`Línea ${i + 1}: el precio no puede ser negativo`);
+  });
+}
+var suma = (ls) => ls.reduce((n, l) => n + l.monto, 0);
+function calcularTotales(modo, entrada, opciones = {}) {
+  validar(entrada);
+  const avisos = [];
+  const base = entrada.map((l) => {
+    const exento = modo === "exento" ? true : l.exento;
+    const precio = modo === "neto" && opciones.preciosConIva && !exento ? Math.round(l.precio / FACTOR * 1e6) / 1e6 : l.precio;
+    return { ...l, exento, precio };
+  });
+  const lineas = base.map((l) => ({ ...l, monto: Math.round(l.cantidad * l.precio) }));
+  lineas.forEach((l, i) => {
+    if (!Number.isSafeInteger(l.monto) || l.monto > MAX_MONTO_DOCUMENTO) {
+      throw new ValidationError(`Línea ${i + 1}: el monto (cantidad por precio) es demasiado grande`);
+    }
+  });
+  const exentas = suma(lineas.filter((l) => l.exento));
+  const afectas = suma(lineas.filter((l) => !l.exento));
+  let totales;
+  if (modo === "exento") {
+    totales = { MntExe: exentas, MntTotal: exentas };
+  } else if (modo === "bruto") {
+    const neto = Math.round(afectas / FACTOR);
+    totales = { MntNeto: neto, ...exentas ? { MntExe: exentas } : {}, IVA: afectas - neto, MntTotal: afectas + exentas };
+  } else {
+    const iva = Math.round(afectas * (TASA_IVA / 100));
+    totales = { MntNeto: afectas, ...exentas ? { MntExe: exentas } : {}, IVA: iva, MntTotal: afectas + exentas + iva };
+    if (opciones.preciosConIva) {
+      const pedido = Math.round(entrada.reduce((n, l) => n + l.cantidad * l.precio, 0));
+      if (pedido !== totales.MntTotal) {
+        avisos.push(`Los precios con IVA suman ${pedido}, pero al desglosarlos el total queda en ${totales.MntTotal}. ` + "El SII calcula el IVA sobre el neto, así que no todo precio bruto tiene un neto exacto.");
+      }
+    }
+  }
+  if (!Number.isSafeInteger(totales.MntTotal) || totales.MntTotal > MAX_MONTO_DOCUMENTO) {
+    throw new ValidationError("El total del documento es demasiado grande");
+  }
+  if (totales.MntTotal === 0 && !opciones.permitirCero) {
+    throw new ValidationError("El total del documento es cero. Revisa los precios de los ítems");
+  }
+  return { lineas, totales, avisos };
+}
+
+// src/commands/emitir/comun.ts
+var TIPOS = {
+  factura: { codigo: 33, modo: "neto", boleta: false, receptor: "obligatorio", nota: false, guia: false },
+  "factura-exenta": { codigo: 34, modo: "exento", boleta: false, receptor: "obligatorio", nota: false, guia: false },
+  boleta: { codigo: 39, modo: "bruto", boleta: true, receptor: "opcional", nota: false, guia: false },
+  "boleta-exenta": { codigo: 41, modo: "exento", boleta: true, receptor: "opcional", nota: false, guia: false },
+  "nota-credito": { codigo: 61, modo: "neto", boleta: false, receptor: "opcional", nota: true, guia: false },
+  "nota-debito": { codigo: 56, modo: "neto", boleta: false, receptor: "opcional", nota: true, guia: false },
+  guia: { codigo: 52, modo: "neto", boleta: false, receptor: "obligatorio", nota: false, guia: true }
+};
+var REFERENCIABLES = {
+  61: [33, 34, 39, 41, 43, 46, 56],
+  56: [33, 34, 43, 46, 61]
+};
+var TIPOS_BOLETA = new Set([39, 41]);
+var TIPOS_EXENTOS = new Set([34, 41]);
+var FORMA_PAGO = { contado: 1, credito: 2, "sin-costo": 3 };
+var MEDIO_PAGO_BOLETA = { efectivo: 1, electronico: 2, transferencia: 3, cheque: 4, otro: 5 };
+var TRASLADO = {
+  venta: 1,
+  "venta-por-efectuar": 2,
+  consignacion: 3,
+  "entrega-gratuita": 4,
+  interno: 5,
+  "otro-traslado": 6,
+  devolucion: 7,
+  "traslado-exportacion": 8,
+  "venta-exportacion": 9
+};
+var DESPACHO = { receptor: 1, "emisor-cliente": 2, "emisor-otro": 3 };
+var CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+var VIGENCIA_RES_154 = "2026-11-01";
+var UMBRAL_BOLETA_IDENTIFICADA = 5000000;
+var MESES_PLAZO_REBAJA = 6;
+var MAX_ESPERA_S = 3600;
+var MAX_PAGINAS_NOTAS = 10;
+function opcion(mapa, valor, flag) {
+  if (valor === undefined)
+    return;
+  const v = mapa[valor.toLowerCase()];
+  if (v === undefined)
+    throw new UsageError(`--${flag}: "${valor}" no existe. Usa ${Object.keys(mapa).join(", ")}`);
+  return v;
+}
+function correo(ctx) {
+  const c = texto(ctx.flags, "correo");
+  if (c !== undefined && !CORREO.test(c))
+    throw new UsageError(`--correo: "${c}" no parece un correo`);
+  return c;
+}
+function lista(ctx, nombre) {
+  return ctx.flags[nombre] ?? [];
+}
+function detalle(lineas) {
+  return lineas.map((l, i) => ({
+    NroLinDet: i + 1,
+    NmbItem: l.nombre,
+    ...l.descripcion ? { DscItem: l.descripcion } : {},
+    QtyItem: l.cantidad,
+    ...l.precio > 0 ? { PrcItem: l.precio } : {},
+    MontoItem: l.monto,
+    ...l.exento ? { IndExe: 1 } : {}
+  }));
+}
+function numeros(t) {
+  const r = {};
+  for (const k of ["MntNeto", "MntExe", "IVA", "MntTotal"])
+    if (t[k] !== undefined && t[k] !== null && t[k] !== "")
+      r[k] = Number(t[k]);
+  return r;
+}
+function totalesDte(totales, tipo, modo) {
+  const t = numeros(totales);
+  if (modo === "exento")
+    return { MntExe: t.MntExe ?? t.MntTotal ?? 0, MntTotal: t.MntTotal ?? 0 };
+  if (tipo.boleta)
+    return t;
+  return { MntNeto: t.MntNeto ?? 0, ...t.MntExe ? { MntExe: t.MntExe } : {}, TasaIVA: TASA_IVA, IVA: t.IVA ?? 0, MntTotal: t.MntTotal ?? 0 };
+}
 
 // src/dte/esquema.ts
 var ORDEN_DTE = {
@@ -1055,8 +1186,8 @@ function actividades(ficha) {
   return Array.isArray(ficha.actividades) ? ficha.actividades : [];
 }
 function principal(ficha) {
-  const lista = actividades(ficha).filter((a) => a.giro || a.codigoActividadEconomica);
-  return lista.find((a) => a.actividadPrincipal) ?? lista[0];
+  const lista2 = actividades(ficha).filter((a) => a.giro || a.codigoActividadEconomica);
+  return lista2.find((a) => a.actividadPrincipal) ?? lista2[0];
 }
 function emisorDesdeOrganizacion(org, esBoleta, acteco, avisos = []) {
   const rut = limpio(org.rut);
@@ -1108,141 +1239,7 @@ function receptorDesdeFicha(rut, ficha, manual, esBoleta, avisos) {
   return receptor;
 }
 
-// src/dte/totales.ts
-var TASA_IVA = 19;
-var MAX_MONTO_DOCUMENTO = 999999999999999;
-var FACTOR = 1 + TASA_IVA / 100;
-function validar(lineas) {
-  if (lineas.length === 0)
-    throw new ValidationError("El documento necesita al menos una línea de detalle (--item)");
-  lineas.forEach((l, i) => {
-    if (!(l.cantidad > 0))
-      throw new ValidationError(`Línea ${i + 1}: la cantidad debe ser mayor que cero`);
-    if (!(l.precio >= 0) || !Number.isFinite(l.precio))
-      throw new ValidationError(`Línea ${i + 1}: el precio no puede ser negativo`);
-  });
-}
-var suma = (ls) => ls.reduce((n, l) => n + l.monto, 0);
-function calcularTotales(modo, entrada, opciones = {}) {
-  validar(entrada);
-  const avisos = [];
-  const base = entrada.map((l) => {
-    const exento = modo === "exento" ? true : l.exento;
-    const precio = modo === "neto" && opciones.preciosConIva && !exento ? Math.round(l.precio / FACTOR * 1e6) / 1e6 : l.precio;
-    return { ...l, exento, precio };
-  });
-  const lineas = base.map((l) => ({ ...l, monto: Math.round(l.cantidad * l.precio) }));
-  lineas.forEach((l, i) => {
-    if (!Number.isSafeInteger(l.monto) || l.monto > MAX_MONTO_DOCUMENTO) {
-      throw new ValidationError(`Línea ${i + 1}: el monto (cantidad por precio) es demasiado grande`);
-    }
-  });
-  const exentas = suma(lineas.filter((l) => l.exento));
-  const afectas = suma(lineas.filter((l) => !l.exento));
-  let totales;
-  if (modo === "exento") {
-    totales = { MntExe: exentas, MntTotal: exentas };
-  } else if (modo === "bruto") {
-    const neto = Math.round(afectas / FACTOR);
-    totales = { MntNeto: neto, ...exentas ? { MntExe: exentas } : {}, IVA: afectas - neto, MntTotal: afectas + exentas };
-  } else {
-    const iva = Math.round(afectas * (TASA_IVA / 100));
-    totales = { MntNeto: afectas, ...exentas ? { MntExe: exentas } : {}, IVA: iva, MntTotal: afectas + exentas + iva };
-    if (opciones.preciosConIva) {
-      const pedido = Math.round(entrada.reduce((n, l) => n + l.cantidad * l.precio, 0));
-      if (pedido !== totales.MntTotal) {
-        avisos.push(`Los precios con IVA suman ${pedido}, pero al desglosarlos el total queda en ${totales.MntTotal}. ` + "El SII calcula el IVA sobre el neto, así que no todo precio bruto tiene un neto exacto.");
-      }
-    }
-  }
-  if (!Number.isSafeInteger(totales.MntTotal) || totales.MntTotal > MAX_MONTO_DOCUMENTO) {
-    throw new ValidationError("El total del documento es demasiado grande");
-  }
-  if (totales.MntTotal === 0 && !opciones.permitirCero) {
-    throw new ValidationError("El total del documento es cero. Revisa los precios de los ítems");
-  }
-  return { lineas, totales, avisos };
-}
-
-// src/commands/emitir.ts
-var TIPOS = {
-  factura: { codigo: 33, modo: "neto", boleta: false, receptor: "obligatorio", nota: false, guia: false },
-  "factura-exenta": { codigo: 34, modo: "exento", boleta: false, receptor: "obligatorio", nota: false, guia: false },
-  boleta: { codigo: 39, modo: "bruto", boleta: true, receptor: "opcional", nota: false, guia: false },
-  "boleta-exenta": { codigo: 41, modo: "exento", boleta: true, receptor: "opcional", nota: false, guia: false },
-  "nota-credito": { codigo: 61, modo: "neto", boleta: false, receptor: "opcional", nota: true, guia: false },
-  "nota-debito": { codigo: 56, modo: "neto", boleta: false, receptor: "opcional", nota: true, guia: false },
-  guia: { codigo: 52, modo: "neto", boleta: false, receptor: "obligatorio", nota: false, guia: true }
-};
-var REFERENCIABLES = {
-  61: [33, 34, 39, 41, 43, 46, 56],
-  56: [33, 34, 43, 46, 61]
-};
-var TIPOS_BOLETA = new Set([39, 41]);
-var TIPOS_EXENTOS = new Set([34, 41]);
-var FORMA_PAGO = { contado: 1, credito: 2, "sin-costo": 3 };
-var MEDIO_PAGO_BOLETA = { efectivo: 1, electronico: 2, transferencia: 3, cheque: 4, otro: 5 };
-var TRASLADO = {
-  venta: 1,
-  "venta-por-efectuar": 2,
-  consignacion: 3,
-  "entrega-gratuita": 4,
-  interno: 5,
-  "otro-traslado": 6,
-  devolucion: 7,
-  "traslado-exportacion": 8,
-  "venta-exportacion": 9
-};
-var DESPACHO = { receptor: 1, "emisor-cliente": 2, "emisor-otro": 3 };
-var CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-var VIGENCIA_RES_154 = "2026-11-01";
-var UMBRAL_BOLETA_IDENTIFICADA = 5000000;
-var MESES_PLAZO_REBAJA = 6;
-var MAX_ESPERA_S = 3600;
-var MAX_PAGINAS_NOTAS = 10;
-function opcion(mapa, valor, flag) {
-  if (valor === undefined)
-    return;
-  const v = mapa[valor.toLowerCase()];
-  if (v === undefined)
-    throw new UsageError(`--${flag}: "${valor}" no existe. Usa ${Object.keys(mapa).join(", ")}`);
-  return v;
-}
-function correo(ctx) {
-  const c = texto(ctx.flags, "correo");
-  if (c !== undefined && !CORREO.test(c))
-    throw new UsageError(`--correo: "${c}" no parece un correo`);
-  return c;
-}
-function lista(ctx, nombre) {
-  return ctx.flags[nombre] ?? [];
-}
-function detalle(lineas) {
-  return lineas.map((l, i) => ({
-    NroLinDet: i + 1,
-    NmbItem: l.nombre,
-    ...l.descripcion ? { DscItem: l.descripcion } : {},
-    QtyItem: l.cantidad,
-    ...l.precio > 0 ? { PrcItem: l.precio } : {},
-    MontoItem: l.monto,
-    ...l.exento ? { IndExe: 1 } : {}
-  }));
-}
-function numeros(t) {
-  const r = {};
-  for (const k of ["MntNeto", "MntExe", "IVA", "MntTotal"])
-    if (t[k] !== undefined && t[k] !== null && t[k] !== "")
-      r[k] = Number(t[k]);
-  return r;
-}
-function totalesDte(totales, tipo, modo) {
-  const t = numeros(totales);
-  if (modo === "exento")
-    return { MntExe: t.MntExe ?? t.MntTotal ?? 0, MntTotal: t.MntTotal ?? 0 };
-  if (tipo.boleta)
-    return t;
-  return { MntNeto: t.MntNeto ?? 0, ...t.MntExe ? { MntExe: t.MntExe } : {}, TasaIVA: TASA_IVA, IVA: t.IVA ?? 0, MntTotal: t.MntTotal ?? 0 };
-}
+// src/commands/emitir/referencias.ts
 function restarMeses(fechaIso, meses) {
   const [a, m, d] = fechaIso.split("-").map(Number);
   const total = a * 12 + (m - 1) - meses;
@@ -1407,6 +1404,11 @@ async function notasPrevias(ctx, ref, rutPropio, receptor, avisos) {
     return null;
   }
 }
+
+// src/commands/emitir/enviar.ts
+import { createHash } from "node:crypto";
+import { existsSync as existsSync2, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname, resolve } from "node:path";
 function validarAntesDeEmitir(ctx) {
   const clave = texto(ctx.flags, "idempotency-key");
   if (clave !== undefined && clave.trim() === "")
@@ -1537,6 +1539,8 @@ async function esperarEstado(ctx, token, segundos) {
     await new Promise((res) => setTimeout(res, intervalo * 1000));
   }
 }
+
+// src/commands/emitir/tipo.ts
 async function emitirTipo(ctx, nombre) {
   const tipo = TIPOS[nombre];
   if (!tipo)
@@ -1737,6 +1741,9 @@ async function emitirTipo(ctx, nombre) {
   };
   return enviar(ctx, dte, { correo: email }, resumen, avisos);
 }
+
+// src/commands/emitir/archivo.ts
+import { readFileSync } from "node:fs";
 async function emitirArchivo(ctx) {
   const ruta = arg(ctx, 1, "archivo.json");
   let contenido;
@@ -1764,6 +1771,8 @@ async function emitirArchivo(ctx) {
   const resumen = { tipo: Number(idDoc.TipoDTE), archivo: ruta, receptor: dte.Encabezado?.Receptor?.RznSocRecep, total: dte.Encabezado?.Totales?.MntTotal };
   return enviar(ctx, dte, { respuesta, correo: email ?? correoArchivo }, resumen, []);
 }
+
+// src/commands/emitir/index.ts
 var USO = `openfactura emitir <tipo> [opciones]
 openfactura emitir archivo <dte.json> [--confirmar]
 
@@ -2133,7 +2142,7 @@ var package_default = {
     build: "bun build src/main.ts --target=node --outfile=dist/cli.js && bun build src/main.ts --compile --outfile=dist/openfactura",
     "build:node": "bun build src/main.ts --target=node --outfile=dist/cli.js",
     "test:xsd": "bun scripts/validar-xsd.ts",
-    lint: "biome check .",
+    lint: "biome check --error-on-warnings .",
     format: "biome check --write .",
     prepack: "bun run build:node"
   },

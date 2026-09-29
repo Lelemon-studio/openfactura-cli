@@ -32,7 +32,7 @@
   },
   "overrides": [
     {
-      "includes": ["test/**", "scripts/**", "src/commands/emitir.ts", "src/dte/esquema.ts"],
+      "includes": ["test/**", "scripts/**", "src/commands/emitir/comun.ts", "src/dte/esquema.ts"],
       "linter": {
         "rules": {
           "suspicious": {

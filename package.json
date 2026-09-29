@@ -22,7 +22,7 @@
     "build": "bun build src/main.ts --target=node --outfile=dist/cli.js && bun build src/main.ts --compile --outfile=dist/openfactura",
     "build:node": "bun build src/main.ts --target=node --outfile=dist/cli.js",
     "test:xsd": "bun scripts/validar-xsd.ts",
-    "lint": "biome check .",
+    "lint": "biome check --error-on-warnings .",
     "format": "biome check --write .",
     "prepack": "bun run build:node"
   },
