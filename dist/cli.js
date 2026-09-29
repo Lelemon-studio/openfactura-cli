@@ -312,7 +312,7 @@ async function rutEmisor(ctx) {
     return normalizarRut(dado);
   const org = await ctx.client.get("/organization");
   if (!org?.rut)
-    throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "SIN_EMISOR");
+    throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "NO_ISSUER");
   return normalizarRut(org.rut);
 }
 function enSeco(ctx, accion, endpoint, body, ejecutar) {
@@ -444,12 +444,12 @@ async function documento(ctx) {
   const campo = accion === "xml" ? "xml" : "pdf";
   const b64 = r?.[campo];
   if (typeof b64 !== "string" || b64 === "")
-    throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "SIN_ARCHIVO");
+    throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "NO_FILE");
   if (!/^[A-Za-z0-9+/\s]+={0,2}\s*$/.test(b64))
-    throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "ARCHIVO_INVALIDO");
+    throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "INVALID_FILE");
   const bytes = Buffer.from(b64, "base64");
   if (campo === "pdf" && bytes.subarray(0, 4).toString("latin1") !== "%PDF") {
-    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "PDF_INVALIDO");
+    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "INVALID_PDF");
   }
   const sufijo = accion === "cedible" ? "_cedible.pdf" : accion === "xml" ? ".xml" : ".pdf";
   return guardarArchivo(texto(ctx.flags, "salida") ?? `${nombreBase}${sufijo}`, bytes, Boolean(ctx.flags.sobrescribir));
@@ -502,7 +502,7 @@ var LECTURAS = [
       const rut = normalizarRut(arg(ctx, 0, "rut"));
       const crudo = await ctx.client.get(`/taxpayer/${rut}`);
       if (crudo !== null && (typeof crudo !== "object" || Array.isArray(crudo))) {
-        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "RESPUESTA_INVALIDA");
+        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "INVALID_RESPONSE");
       }
       const r = crudo ?? {};
       const actividades = Array.isArray(r.actividades) ? r.actividades : [];
@@ -637,9 +637,7 @@ var LECTURAS = [
     minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de compras de un mes o un día, separado por estado",
-    uso: [
-      "openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]"
-    ].join(`
+    uso: ["openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]"].join(`
 `),
     flags: { estado: { type: "string" } },
     run: (ctx) => {
@@ -994,7 +992,8 @@ function ordenarDte(dte, esBoleta) {
 }
 function revisarLargos(valor, ruta, errores) {
   if (Array.isArray(valor)) {
-    valor.forEach((v, i) => revisarLargos(v, `${ruta}[${i + 1}]`, errores));
+    for (const [i, v] of valor.entries())
+      revisarLargos(v, `${ruta}[${i + 1}]`, errores);
     return;
   }
   if (!valor || typeof valor !== "object")
@@ -1488,7 +1487,7 @@ async function enviar(ctx, dte, extra, resumen, avisos) {
     throw e;
   }
   if (!r || typeof r !== "object" || Array.isArray(r) || typeof r.TOKEN !== "string") {
-    throw new ApiError("OpenFactura respondió algo que no es una emisión y no se sabe si el documento se emitió. Repite exactamente el mismo comando: la idempotencia evita emitirlo dos veces", 0, "RESPUESTA_INVALIDA", { idempotencyKey: key, fecha: dte.Encabezado?.IdDoc?.FchEmis });
+    throw new ApiError("OpenFactura respondió algo que no es una emisión y no se sabe si el documento se emitió. Repite exactamente el mismo comando: la idempotencia evita emitirlo dos veces", 0, "INVALID_RESPONSE", { idempotencyKey: key, fecha: dte.Encabezado?.IdDoc?.FchEmis });
   }
   const res = r;
   const salida = {
@@ -1510,7 +1509,7 @@ async function enviar(ctx, dte, extra, resumen, avisos) {
         writeFileSync2(pdf, bytes);
         salida.pdf = { archivo: pdf, bytes: bytes.length };
       } else {
-        avisos.push("El documento se emitió, pero el PDF no llegó bien. Pídelo con: openfactura documento pdf --token " + res.TOKEN);
+        avisos.push(`El documento se emitió, pero el PDF no llegó bien. Pídelo con: openfactura documento pdf --token ${res.TOKEN}`);
       }
     }
   } catch (e) {
@@ -2108,9 +2107,66 @@ var SKILLS = [
 
 // src/commands/index.ts
 var COMANDOS = [...LECTURAS, ...EMISION, ...SKILLS];
+// package.json
+var package_default = {
+  name: "openfactura-cli",
+  version: "0.2.0",
+  description: "CLI no oficial para la API de OpenFactura (Haulmer): emitir y consultar documentos tributarios electrónicos del SII.",
+  type: "module",
+  bin: {
+    openfactura: "./dist/cli.js"
+  },
+  files: [
+    "dist/cli.js",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  engines: {
+    node: ">=20"
+  },
+  scripts: {
+    dev: "bun src/main.ts",
+    test: "bun test",
+    typecheck: "tsc --noEmit",
+    build: "bun build src/main.ts --target=node --outfile=dist/cli.js && bun build src/main.ts --compile --outfile=dist/openfactura",
+    "build:node": "bun build src/main.ts --target=node --outfile=dist/cli.js",
+    "test:xsd": "bun scripts/validar-xsd.ts",
+    lint: "biome check .",
+    format: "biome check --write .",
+    prepack: "bun run build:node"
+  },
+  devDependencies: {
+    "@biomejs/biome": "2.5.14",
+    "@types/bun": "1.4.2",
+    typescript: "5.9.3"
+  },
+  license: "MIT",
+  author: "Lelemon SpA",
+  repository: {
+    type: "git",
+    url: "git+https://github.com/Lelemon-studio/openfactura-cli.git"
+  },
+  homepage: "https://github.com/Lelemon-studio/openfactura-cli#readme",
+  bugs: {
+    url: "https://github.com/Lelemon-studio/openfactura-cli/issues"
+  },
+  keywords: [
+    "openfactura",
+    "haulmer",
+    "sii",
+    "dte",
+    "factura-electronica",
+    "boleta-electronica",
+    "chile",
+    "cli",
+    "claude"
+  ],
+  packageManager: "bun@1.3.14"
+};
 
 // src/version.ts
-var VERSION = "0.1.0";
+var VERSION = package_default.version;
 
 // src/cli.ts
 var FLAGS_GLOBALES = {
@@ -2236,7 +2292,10 @@ async function run(argv, env, io) {
       return error(io, { error: e.message, code: e.code }, 2);
     const sistema = e;
     if (sistema.syscall) {
-      return error(io, { error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`, code: "ARCHIVO" }, 2);
+      return error(io, {
+        error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`,
+        code: "FILE"
+      }, 2);
     }
     const nodeCode = sistema.code;
     if (typeof nodeCode === "string" && nodeCode.startsWith("ERR_PARSE_ARGS")) {
@@ -2248,9 +2307,9 @@ async function run(argv, env, io) {
 
 // src/main.ts
 var codigo = await run(process.argv.slice(2), process.env, {
-  out: (s) => process.stdout.write(s + `
+  out: (s) => process.stdout.write(`${s}
 `),
-  err: (s) => process.stderr.write(s + `
+  err: (s) => process.stderr.write(`${s}
 `)
 });
 process.exitCode = codigo;

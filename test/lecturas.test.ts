@@ -267,10 +267,7 @@ describe("operaciones que escriben en el SII piden --confirmar", () => {
 
 describe("paginación que no pierde lo que ya bajó", () => {
   test("si una página falla a mitad de camino devuelve lo acumulado con aviso", async () => {
-    cola(
-      { status: 200, body: { current_page: 1, last_page: 3, total: 3, data: [{ Folio: 1 }] } },
-      { status: 500, body: { error: { message: "caído" } } },
-    );
+    cola({ status: 200, body: { current_page: 1, last_page: 3, total: 3, data: [{ Folio: 1 }] } }, { status: 500, body: { error: { message: "caído" } } });
     const r = await ejecutar("emitidos", "--todas");
     expect(r.codigo).toBe(0);
     expect(r.out.documentos).toEqual([{ Folio: 1 }]);
@@ -284,10 +281,7 @@ describe("paginación que no pierde lo que ya bajó", () => {
   });
 
   test("--folio que no aparece en un listado incompleto no dice que no existe", async () => {
-    cola(
-      { status: 200, body: { current_page: 1, last_page: 2, total: 2, data: [{ Folio: 1 }] } },
-      { status: 500, body: { error: { message: "caído" } } },
-    );
+    cola({ status: 200, body: { current_page: 1, last_page: 2, total: 2, data: [{ Folio: 1 }] } }, { status: 500, body: { error: { message: "caído" } } });
     const r = await ejecutar("emitidos", "--folio", "9");
     expect(r.out.incompleto).toBe(true);
     expect(r.out.avisos.join(" ")).toContain("no se revisaron todas");

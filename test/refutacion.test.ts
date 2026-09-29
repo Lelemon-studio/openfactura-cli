@@ -20,10 +20,16 @@ const ORG = {
   glosaDescriptiva: "SERVICIOS",
   actividades: [{ giro: "X", codigoActividadEconomica: "641990", actividadPrincipal: true }],
 };
-const HOSTY = { rut: "76430498-5", razonSocial: "HOSTY SPA", direccion: "PRAT 527", comuna: "Curicó", actividades: [{ giro: "CONSULTORIA", codigoActividadEconomica: "620200", actividadPrincipal: true }] };
+const HOSTY = {
+  rut: "76430498-5",
+  razonSocial: "HOSTY SPA",
+  direccion: "PRAT 527",
+  comuna: "Curicó",
+  actividades: [{ giro: "CONSULTORIA", codigoActividadEconomica: "620200", actividadPrincipal: true }],
+};
 
 function responde(ruta: string, ...rs: Array<{ status: number; body: unknown; crudo?: string }>) {
-  (rutas[ruta] ??= []).push(...rs);
+  rutas[ruta] = [...(rutas[ruta] ?? []), ...rs];
 }
 
 beforeEach(() => {
@@ -35,9 +41,15 @@ beforeEach(() => {
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const ruta = String(url).replace(BASE, "");
     const metodo = init?.method ?? "GET";
-    llamadas.push({ url: ruta, method: metodo, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers: (init?.headers ?? {}) as Record<string, string> });
+    llamadas.push({
+      url: ruta,
+      method: metodo,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      headers: (init?.headers ?? {}) as Record<string, string>,
+    });
     const cola = rutas[`${metodo} ${ruta}`];
-    const r = cola && cola.length > 1 ? cola.shift()! : cola?.[0] ?? { status: 404, body: { error: { message: `sin mock ${metodo} ${ruta}`, code: "TEST" } } };
+    const r =
+      cola && cola.length > 1 ? cola.shift()! : (cola?.[0] ?? { status: 404, body: { error: { message: `sin mock ${metodo} ${ruta}`, code: "TEST" } } });
     const texto = r.crudo ?? (r.body == null ? null : JSON.stringify(r.body));
     return new Response(texto, { status: r.status });
   }) as typeof fetch;
@@ -104,7 +116,10 @@ describe("idempotencia", () => {
   });
 
   test("OF-06 con token se informa como ya emitido, con código 0", async () => {
-    responde("POST /document", { status: 400, body: { error: { message: "Este DTE ya fue emitido (Idempotency-Key)", code: "OF-06", details: [{ field: "token", issue: "tokviejo" }] } } });
+    responde("POST /document", {
+      status: 400,
+      body: { error: { message: "Este DTE ya fue emitido (Idempotency-Key)", code: "OF-06", details: [{ field: "token", issue: "tokviejo" }] } },
+    });
     const r = await ejecutar(...FACTURA, "--confirmar");
     expect(r.codigo).toBe(0);
     expect(r.out).toMatchObject({ emitido: false, yaEmitido: true, token: "tokviejo" });
@@ -149,7 +164,10 @@ describe("números", () => {
   });
 
   test("un exento que no es booleano se rechaza", async () => {
-    expect((await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", '{"nombre":"x","precio":100,"exento":"true"}', "--fecha", "2026-09-27")).codigo).toBe(2);
+    expect(
+      (await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", '{"nombre":"x","precio":100,"exento":"true"}', "--fecha", "2026-09-27"))
+        .codigo,
+    ).toBe(2);
   });
 
   test("un campo desconocido en el JSON del ítem se rechaza", async () => {
@@ -159,7 +177,10 @@ describe("números", () => {
   });
 
   test("un monto absurdo se rechaza", async () => {
-    expect((await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", '{"nombre":"x","precio":100000000000000000000}', "--fecha", "2026-09-27")).codigo).toBe(2);
+    expect(
+      (await ejecutar("emitir", "factura", "--receptor", "76430498-5", "--item", '{"nombre":"x","precio":100000000000000000000}', "--fecha", "2026-09-27"))
+        .codigo,
+    ).toBe(2);
   });
 });
 
@@ -168,7 +189,7 @@ describe("respuestas raras de la API", () => {
     responde("POST /document", { status: 200, body: null, crudo: "<html>proxy</html>" });
     const r = await ejecutar(...FACTURA, "--confirmar");
     expect(r.codigo).toBe(1);
-    expect(r.err.code).toBe("RESPUESTA_INVALIDA");
+    expect(r.err.code).toBe("INVALID_RESPONSE");
     expect(r.err.error).toContain("mismo comando");
   });
 
@@ -209,7 +230,14 @@ describe("respuestas raras de la API", () => {
   test("un 429 que pide esperar demasiado no se espera", async () => {
     let esperado = 0;
     globalThis.fetch = (async () => new Response(JSON.stringify({ message: "Try again in 3600 seconds." }), { status: 429 })) as unknown as typeof fetch;
-    const c = new OpenFacturaClient({ apiKey: "k", baseUrl: "https://x", timeoutMs: 1000, esperar: async (ms) => void (esperado += ms) });
+    const c = new OpenFacturaClient({
+      apiKey: "k",
+      baseUrl: "https://x",
+      timeoutMs: 1000,
+      esperar: async (ms) => {
+        esperado += ms;
+      },
+    });
     const e = (await c.get("/x").catch((x: unknown) => x)) as { code: string };
     expect(e.code).toBe("RATE_LIMIT");
     expect(esperado).toBe(0);
@@ -233,7 +261,7 @@ describe("argumentos", () => {
 
   test("un archivo con BOM se lee", async () => {
     const archivo = join(dir, "dte.json");
-    writeFileSync(archivo, "﻿" + JSON.stringify({ Encabezado: { IdDoc: { TipoDTE: 33, Folio: 0 } }, Detalle: [] }));
+    writeFileSync(archivo, `﻿${JSON.stringify({ Encabezado: { IdDoc: { TipoDTE: 33, Folio: 0 } }, Detalle: [] })}`);
     expect((await ejecutar("emitir", "archivo", archivo)).codigo).toBe(0);
   });
 

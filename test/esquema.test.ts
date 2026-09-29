@@ -32,7 +32,10 @@ describe("orden del XSD del SII", () => {
   });
 
   test("ordena el transporte y el chofer de la guía", () => {
-    const dte = ordenarDte({ Encabezado: { Transporte: { CmnaDest: "C", Chofer: { NombreChofer: "N", RUTChofer: "1-9" }, Patente: "P", RUTTrans: "1-9" } } }, false);
+    const dte = ordenarDte(
+      { Encabezado: { Transporte: { CmnaDest: "C", Chofer: { NombreChofer: "N", RUTChofer: "1-9" }, Patente: "P", RUTTrans: "1-9" } } },
+      false,
+    );
     expect(claves(dte.Encabezado.Transporte)).toEqual(["Patente", "RUTTrans", "Chofer", "CmnaDest"]);
     expect(claves(dte.Encabezado.Transporte.Chofer)).toEqual(["RUTChofer", "NombreChofer"]);
   });
@@ -45,7 +48,10 @@ describe("orden del XSD del SII", () => {
 
 describe("largos y cantidades del XSD", () => {
   const base = (receptor: object = {}, detalle: object[] = [{ NmbItem: "x" }], extra: object = {}) => ({
-    Encabezado: { Emisor: { RznSoc: "E", GiroEmis: "G", DirOrigen: "D", CmnaOrigen: "C" }, Receptor: { RznSocRecep: "R", DirRecep: "D", CmnaRecep: "C", ...receptor } },
+    Encabezado: {
+      Emisor: { RznSoc: "E", GiroEmis: "G", DirOrigen: "D", CmnaOrigen: "C" },
+      Receptor: { RznSocRecep: "R", DirRecep: "D", CmnaRecep: "C", ...receptor },
+    },
     Detalle: detalle,
     ...extra,
   });

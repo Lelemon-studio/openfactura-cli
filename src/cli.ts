@@ -129,7 +129,14 @@ export async function run(argv: string[], env: Record<string, string | undefined
     if (e instanceof UsageError || e instanceof ConfigError) return error(io, { error: e.message, code: e.code }, 2);
     const sistema = e as { code?: string; syscall?: string; path?: string };
     if (sistema.syscall) {
-      return error(io, { error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`, code: "ARCHIVO" }, 2);
+      return error(
+        io,
+        {
+          error: `No se pudo ${sistema.syscall === "open" ? "escribir o leer" : sistema.syscall} ${sistema.path ?? "el archivo"}: ${sistema.code}`,
+          code: "FILE",
+        },
+        2,
+      );
     }
     const nodeCode = sistema.code;
     if (typeof nodeCode === "string" && nodeCode.startsWith("ERR_PARSE_ARGS")) {

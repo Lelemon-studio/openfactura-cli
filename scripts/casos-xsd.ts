@@ -21,16 +21,30 @@ const RECEPTOR = {
 };
 const REC_DTE = { RUTRecep: "76430498-5", RznSocRecep: "HOSTY SPA", GiroRecep: "CONSULTORIA", DirRecep: "ARTURO PRAT 527", CmnaRecep: "Curicó" };
 const original = (tipo: number, totales: object, detalle: object[], receptor: object = REC_DTE) => ({
-  json: { Encabezado: { IdDoc: { TipoDTE: tipo, FchEmis: "2026-09-20" }, Emisor: { RUTEmisor: "76795561-8" }, Receptor: receptor, Totales: totales }, Detalle: detalle },
+  json: {
+    Encabezado: { IdDoc: { TipoDTE: tipo, FchEmis: "2026-09-20" }, Emisor: { RUTEmisor: "76795561-8" }, Receptor: receptor, Totales: totales },
+    Detalle: detalle,
+  },
 });
 
 const RUTAS: Record<string, unknown> = {
   "GET /organization": ORG,
   "GET /taxpayer/76430498-5": RECEPTOR,
-  "GET /document/76795561-8/33/30/json": original(33, { MntNeto: 100000, TasaIVA: 19, IVA: 19000, MntTotal: 119000 }, [{ NroLinDet: 1, NmbItem: "Servicio", QtyItem: 1, PrcItem: 100000, MontoItem: 100000 }]),
-  "GET /document/76795561-8/34/31/json": original(34, { MntExe: 50000, MntTotal: 50000 }, [{ NroLinDet: 1, NmbItem: "Arriendo", QtyItem: 1, PrcItem: 50000, MontoItem: 50000, IndExe: 1 }]),
-  "GET /document/76795561-8/39/32/json": original(39, { MntNeto: 10000, IVA: 1900, MntTotal: 11900 }, [{ NroLinDet: 1, NmbItem: "Producto", QtyItem: 1, PrcItem: 11900, MontoItem: 11900 }], { RUTRecep: "66666666-6", RznSocRecep: "Cliente", DirRecep: "Sin direccion", CmnaRecep: "Santiago" }),
-  "GET /document/76795561-8/61/33/json": original(61, { MntNeto: 10000, TasaIVA: 19, IVA: 1900, MntTotal: 11900 }, [{ NroLinDet: 1, NmbItem: "Descuento", QtyItem: 1, PrcItem: 10000, MontoItem: 10000 }]),
+  "GET /document/76795561-8/33/30/json": original(33, { MntNeto: 100000, TasaIVA: 19, IVA: 19000, MntTotal: 119000 }, [
+    { NroLinDet: 1, NmbItem: "Servicio", QtyItem: 1, PrcItem: 100000, MontoItem: 100000 },
+  ]),
+  "GET /document/76795561-8/34/31/json": original(34, { MntExe: 50000, MntTotal: 50000 }, [
+    { NroLinDet: 1, NmbItem: "Arriendo", QtyItem: 1, PrcItem: 50000, MontoItem: 50000, IndExe: 1 },
+  ]),
+  "GET /document/76795561-8/39/32/json": original(
+    39,
+    { MntNeto: 10000, IVA: 1900, MntTotal: 11900 },
+    [{ NroLinDet: 1, NmbItem: "Producto", QtyItem: 1, PrcItem: 11900, MontoItem: 11900 }],
+    { RUTRecep: "66666666-6", RznSocRecep: "Cliente", DirRecep: "Sin direccion", CmnaRecep: "Santiago" },
+  ),
+  "GET /document/76795561-8/61/33/json": original(61, { MntNeto: 10000, TasaIVA: 19, IVA: 1900, MntTotal: 11900 }, [
+    { NroLinDet: 1, NmbItem: "Descuento", QtyItem: 1, PrcItem: 10000, MontoItem: 10000 },
+  ]),
   "GET /document/76795561-8/52/34/json": original(52, { MntNeto: 5000, TasaIVA: 19, IVA: 950, MntTotal: 5950 }, []),
 };
 
@@ -45,7 +59,22 @@ const F = ["--fecha", "2026-10-15"];
 const R = ["--receptor", "76430498-5"];
 export const CASOS: Record<string, string[]> = {
   "factura-simple": ["factura", ...R, "--item", "Servicio|1|100000"],
-  "factura-varias-lineas": ["factura", ...R, "--item", "Producto|3|1500.5", "--item", '{"nombre":"Instalación","cantidad":1,"precio":20000,"descripcion":"En terreno, día hábil"}', "--item", "Arriendo bodega|1|50000|exento", "--forma-pago", "credito", "--correo", "pagos@hosty.cl", "--contacto", "Juan"],
+  "factura-varias-lineas": [
+    "factura",
+    ...R,
+    "--item",
+    "Producto|3|1500.5",
+    "--item",
+    '{"nombre":"Instalación","cantidad":1,"precio":20000,"descripcion":"En terreno, día hábil"}',
+    "--item",
+    "Arriendo bodega|1|50000|exento",
+    "--forma-pago",
+    "credito",
+    "--correo",
+    "pagos@hosty.cl",
+    "--contacto",
+    "Juan",
+  ],
   "factura-con-iva": ["factura", ...R, "--item", "Plan anual|1|177310", "--con-iva"],
   "factura-con-referencias": ["factura", ...R, "--item", "Caja|5|1000", "--ref", "52:34", "--ref", "801:OC-55:2026-10-01"],
   "factura-exenta": ["factura-exenta", ...R, "--item", "Arriendo oficina sin amoblar|1|500000"],
@@ -62,8 +91,50 @@ export const CASOS: Record<string, string[]> = {
   "nc-anula-boleta": ["nota-credito", "--referencia", "39:32", "--anula"],
   "nd-corrige-montos": ["nota-debito", "--referencia", "33:30", "--corrige-montos", "--razon", "Intereses", "--item", "Intereses|1|2000"],
   "nd-anula-nc": ["nota-debito", "--referencia", "61:33", "--anula"],
-  "guia-venta-completa": ["guia", ...R, "--item", "Caja|10|1000", "--traslado", "venta", "--despacho", "emisor-cliente", "--destino-direccion", "Calle Uno 123", "--destino-comuna", "Talca", "--chofer-rut", "11111111-1", "--chofer-nombre", "Juan Pérez", "--transportista-rut", "76430498-5", "--patente", "ABCD12", "--patente-carro", "JK1234"],
-  "guia-traslado-interno": ["guia", ...R, "--item", "Caja|10|0", "--traslado", "interno", "--destino-direccion", "Bodega 2", "--destino-comuna", "Talca", "--chofer-rut", "11111111-1", "--chofer-nombre", "Juan Pérez", "--transportista-rut", "76430498-5", "--patente", "ABCD12"],
+  "guia-venta-completa": [
+    "guia",
+    ...R,
+    "--item",
+    "Caja|10|1000",
+    "--traslado",
+    "venta",
+    "--despacho",
+    "emisor-cliente",
+    "--destino-direccion",
+    "Calle Uno 123",
+    "--destino-comuna",
+    "Talca",
+    "--chofer-rut",
+    "11111111-1",
+    "--chofer-nombre",
+    "Juan Pérez",
+    "--transportista-rut",
+    "76430498-5",
+    "--patente",
+    "ABCD12",
+    "--patente-carro",
+    "JK1234",
+  ],
+  "guia-traslado-interno": [
+    "guia",
+    ...R,
+    "--item",
+    "Caja|10|0",
+    "--traslado",
+    "interno",
+    "--destino-direccion",
+    "Bodega 2",
+    "--destino-comuna",
+    "Talca",
+    "--chofer-rut",
+    "11111111-1",
+    "--chofer-nombre",
+    "Juan Pérez",
+    "--transportista-rut",
+    "76430498-5",
+    "--patente",
+    "ABCD12",
+  ],
 };
 
 export async function generar(dir: string): Promise<string[]> {

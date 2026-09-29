@@ -15,7 +15,7 @@ export async function rutEmisor(ctx: Contexto): Promise<string> {
   const dado = texto(ctx.flags, "rut");
   if (dado) return normalizarRut(dado);
   const org = (await ctx.client.get("/organization")) as { rut?: string } | null;
-  if (!org?.rut) throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "SIN_EMISOR");
+  if (!org?.rut) throw new ApiError("OpenFactura no devolvió el RUT del emisor", 0, "NO_ISSUER");
   return normalizarRut(org.rut);
 }
 
@@ -152,11 +152,11 @@ async function documento(ctx: Contexto) {
 
   const campo = accion === "xml" ? "xml" : "pdf";
   const b64 = r?.[campo];
-  if (typeof b64 !== "string" || b64 === "") throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "SIN_ARCHIVO");
-  if (!/^[A-Za-z0-9+/\s]+={0,2}\s*$/.test(b64)) throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "ARCHIVO_INVALIDO");
+  if (typeof b64 !== "string" || b64 === "") throw new ApiError(`OpenFactura no devolvió el campo ${campo}`, 0, "NO_FILE");
+  if (!/^[A-Za-z0-9+/\s]+={0,2}\s*$/.test(b64)) throw new ApiError(`OpenFactura devolvió un ${campo} que no es base64`, 0, "INVALID_FILE");
   const bytes = Buffer.from(b64, "base64");
   if (campo === "pdf" && bytes.subarray(0, 4).toString("latin1") !== "%PDF") {
-    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "PDF_INVALIDO");
+    throw new ApiError("Lo que devolvió OpenFactura no es un PDF", 0, "INVALID_PDF");
   }
   const sufijo = accion === "cedible" ? "_cedible.pdf" : accion === "xml" ? ".xml" : ".pdf";
   return guardarArchivo(texto(ctx.flags, "salida") ?? `${nombreBase}${sufijo}`, bytes, Boolean(ctx.flags.sobrescribir));
@@ -208,7 +208,7 @@ export const LECTURAS: Comando[] = [
       const rut = normalizarRut(arg(ctx, 0, "rut"));
       const crudo = await ctx.client.get(`/taxpayer/${rut}`);
       if (crudo !== null && (typeof crudo !== "object" || Array.isArray(crudo))) {
-        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "RESPUESTA_INVALIDA");
+        throw new ApiError("OpenFactura devolvió algo que no es la ficha del contribuyente", 0, "INVALID_RESPONSE");
       }
       const r = (crudo ?? {}) as Record<string, unknown>;
       const actividades = Array.isArray(r.actividades) ? (r.actividades as Array<Record<string, unknown>>) : [];
@@ -317,9 +317,7 @@ export const LECTURAS: Comando[] = [
         rut: normalizarRut(requerido(ctx.flags, "rut-emisor")),
         acuse,
       };
-      return enSeco(ctx, "acusar documento recibido", "POST /document/received/accuse", body, () =>
-        ctx.client.post("/document/received/accuse", body),
-      );
+      return enSeco(ctx, "acusar documento recibido", "POST /document/received/accuse", body, () => ctx.client.post("/document/received/accuse", body));
     },
   },
   {
@@ -335,9 +333,7 @@ export const LECTURAS: Comando[] = [
     minArgs: 1,
     maxArgs: 1,
     resumen: "Resumen del registro de compras de un mes o un día, separado por estado",
-    uso: [
-      "openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]",
-    ].join("\n"),
+    uso: ["openfactura compras <AAAA-MM | AAAA-MM-DD> [--estado pendiente,registrado,excluido,reclamado]"].join("\n"),
     flags: { estado: { type: "string" } },
     run: (ctx) => {
       let ruta = `/registry/purchase/${rutaPeriodo(periodo(arg(ctx, 0, "período")))}`;

@@ -1,7 +1,7 @@
 {
   "name": "openfactura-cli",
-  "version": "0.1.0",
-  "description": "CLI para la API de OpenFactura (Haulmer): emitir y consultar documentos tributarios electrónicos del SII.",
+  "version": "0.2.0",
+  "description": "CLI no oficial para la API de OpenFactura (Haulmer): emitir y consultar documentos tributarios electrónicos del SII.",
   "type": "module",
   "bin": {
     "openfactura": "./dist/cli.js"
@@ -21,11 +21,15 @@
     "typecheck": "tsc --noEmit",
     "build": "bun build src/main.ts --target=node --outfile=dist/cli.js && bun build src/main.ts --compile --outfile=dist/openfactura",
     "build:node": "bun build src/main.ts --target=node --outfile=dist/cli.js",
-    "test:xsd": "bun scripts/validar-xsd.ts"
+    "test:xsd": "bun scripts/validar-xsd.ts",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "prepack": "bun run build:node"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^5.6.0"
+    "@biomejs/biome": "2.5.14",
+    "@types/bun": "1.4.2",
+    "typescript": "5.9.3"
   },
   "license": "MIT",
   "author": "Lelemon SpA",
@@ -47,5 +51,6 @@
     "chile",
     "cli",
     "claude"
-  ]
+  ],
+  "packageManager": "bun@1.3.14"
 }

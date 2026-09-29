@@ -15,8 +15,20 @@ const ORG = {
   glosaDescriptiva: "SERVICIOS",
   actividades: [{ giro: "X", codigoActividadEconomica: "641990", actividadPrincipal: true }],
 };
-const HOSTY = { rut: "76430498-5", razonSocial: "HOSTY SPA", direccion: "PRAT 527", comuna: "Curicó", actividades: [{ giro: "CONSULTORIA", codigoActividadEconomica: "620200", actividadPrincipal: true }] };
-const OTRO = { rut: "11111111-1", razonSocial: "OTRA SPA", direccion: "X 1", comuna: "Talca", actividades: [{ giro: "COMERCIO", codigoActividadEconomica: "1", actividadPrincipal: true }] };
+const HOSTY = {
+  rut: "76430498-5",
+  razonSocial: "HOSTY SPA",
+  direccion: "PRAT 527",
+  comuna: "Curicó",
+  actividades: [{ giro: "CONSULTORIA", codigoActividadEconomica: "620200", actividadPrincipal: true }],
+};
+const OTRO = {
+  rut: "11111111-1",
+  razonSocial: "OTRA SPA",
+  direccion: "X 1",
+  comuna: "Talca",
+  actividades: [{ giro: "COMERCIO", codigoActividadEconomica: "1", actividadPrincipal: true }],
+};
 const RECEPTOR_30 = { RUTRecep: "76430498-5", RznSocRecep: "HOSTY SPA", GiroRecep: "SERVICIOS", DirRecep: "MONTT 152", CmnaRecep: "Curicó" };
 
 function doc(tipo: number, fecha: string, receptor: object, totales: object, detalle: object[]) {
@@ -24,7 +36,7 @@ function doc(tipo: number, fecha: string, receptor: object, totales: object, det
 }
 
 function responde(ruta: string, ...rs: Array<{ status: number; body: unknown }>) {
-  (rutas[ruta] ??= []).push(...rs);
+  rutas[ruta] = [...(rutas[ruta] ?? []), ...rs];
 }
 
 beforeEach(() => {
@@ -33,11 +45,41 @@ beforeEach(() => {
   responde("GET /organization", { status: 200, body: ORG });
   responde("GET /taxpayer/76430498-5", { status: 200, body: HOSTY });
   responde("GET /taxpayer/11111111-1", { status: 200, body: OTRO });
-  responde("GET /document/76795561-8/33/30/json", doc(33, "2026-09-22", RECEPTOR_30, { MntNeto: 149000, TasaIVA: 19, IVA: 28310, MntTotal: 177310 }, [{ NroLinDet: 1, NmbItem: "Plan", QtyItem: 1, PrcItem: 149000, MontoItem: 149000 }]));
-  responde("GET /document/76795561-8/33/40/json", doc(33, "2026-09-01", RECEPTOR_30, { MntNeto: 1000, MntExe: 50000, TasaIVA: 19, IVA: 190, MntTotal: 51190 }, [{ NroLinDet: 1, NmbItem: "A", QtyItem: 1, PrcItem: 1000, MontoItem: 1000 }, { NroLinDet: 2, NmbItem: "B", QtyItem: 1, PrcItem: 50000, MontoItem: 50000, IndExe: 1 }]));
-  responde("GET /document/76795561-8/33/10/json", doc(33, "2026-01-15", RECEPTOR_30, { MntNeto: 10000, TasaIVA: 19, IVA: 1900, MntTotal: 11900 }, [{ NroLinDet: 1, NmbItem: "Viejo", QtyItem: 1, PrcItem: 10000, MontoItem: 10000 }]));
-  responde("GET /document/76795561-8/39/1004/json", doc(39, "2026-09-17", { RUTRecep: "66666666-6", RznSocRecep: "Cliente", DirRecep: "Sin direccion", CmnaRecep: "Santiago" }, { MntNeto: 40951, IVA: 7781, MntTotal: 48732 }, [{ NroLinDet: 1, NmbItem: "Plan", QtyItem: 1, PrcItem: 48732, MontoItem: 48732 }]));
-  responde("GET /document/76795561-8/34/5/json", doc(34, "2026-09-10", RECEPTOR_30, { MntExe: 100000, MntTotal: 100000 }, [{ NroLinDet: 1, NmbItem: "Arriendo", QtyItem: 1, PrcItem: 100000, MontoItem: 100000, IndExe: 1 }]));
+  responde(
+    "GET /document/76795561-8/33/30/json",
+    doc(33, "2026-09-22", RECEPTOR_30, { MntNeto: 149000, TasaIVA: 19, IVA: 28310, MntTotal: 177310 }, [
+      { NroLinDet: 1, NmbItem: "Plan", QtyItem: 1, PrcItem: 149000, MontoItem: 149000 },
+    ]),
+  );
+  responde(
+    "GET /document/76795561-8/33/40/json",
+    doc(33, "2026-09-01", RECEPTOR_30, { MntNeto: 1000, MntExe: 50000, TasaIVA: 19, IVA: 190, MntTotal: 51190 }, [
+      { NroLinDet: 1, NmbItem: "A", QtyItem: 1, PrcItem: 1000, MontoItem: 1000 },
+      { NroLinDet: 2, NmbItem: "B", QtyItem: 1, PrcItem: 50000, MontoItem: 50000, IndExe: 1 },
+    ]),
+  );
+  responde(
+    "GET /document/76795561-8/33/10/json",
+    doc(33, "2026-01-15", RECEPTOR_30, { MntNeto: 10000, TasaIVA: 19, IVA: 1900, MntTotal: 11900 }, [
+      { NroLinDet: 1, NmbItem: "Viejo", QtyItem: 1, PrcItem: 10000, MontoItem: 10000 },
+    ]),
+  );
+  responde(
+    "GET /document/76795561-8/39/1004/json",
+    doc(
+      39,
+      "2026-09-17",
+      { RUTRecep: "66666666-6", RznSocRecep: "Cliente", DirRecep: "Sin direccion", CmnaRecep: "Santiago" },
+      { MntNeto: 40951, IVA: 7781, MntTotal: 48732 },
+      [{ NroLinDet: 1, NmbItem: "Plan", QtyItem: 1, PrcItem: 48732, MontoItem: 48732 }],
+    ),
+  );
+  responde(
+    "GET /document/76795561-8/34/5/json",
+    doc(34, "2026-09-10", RECEPTOR_30, { MntExe: 100000, MntTotal: 100000 }, [
+      { NroLinDet: 1, NmbItem: "Arriendo", QtyItem: 1, PrcItem: 100000, MontoItem: 100000, IndExe: 1 },
+    ]),
+  );
   responde("GET /document/76795561-8/52/123/json", doc(52, "2026-09-20", RECEPTOR_30, { MntNeto: 10000, TasaIVA: 19, IVA: 1900, MntTotal: 11900 }, []));
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const ruta = String(url).replace(BASE, "");
@@ -140,7 +182,9 @@ describe("documentos que se pueden referenciar", () => {
 
 describe("plazos", () => {
   test("la nota no puede tener fecha anterior al documento que corrige", async () => {
-    expect((await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--item", "x|1|100", "--fecha", "2026-09-01")).codigo).toBe(2);
+    expect((await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--item", "x|1|100", "--fecha", "2026-09-01")).codigo).toBe(
+      2,
+    );
   });
 
   test("sobre un documento de hace más de 6 meses avisa por el plazo de rebaja del IVA", async () => {
@@ -167,7 +211,20 @@ describe("corregir texto de un documento exento", () => {
 });
 
 describe("guía de despacho y Res. 154/2025", () => {
-  const GUIA = ["emitir", "guia", "--receptor", "76430498-5", "--item", "Caja|1|1000", "--traslado", "venta", "--destino-direccion", "Calle 2", "--destino-comuna", "Talca"];
+  const GUIA = [
+    "emitir",
+    "guia",
+    "--receptor",
+    "76430498-5",
+    "--item",
+    "Caja|1|1000",
+    "--traslado",
+    "venta",
+    "--destino-direccion",
+    "Calle 2",
+    "--destino-comuna",
+    "Talca",
+  ];
 
   test("desde el 1-nov-2026 exige chofer y patente", async () => {
     const r = await ejecutar(...GUIA, "--fecha", "2026-11-02");
@@ -176,7 +233,19 @@ describe("guía de despacho y Res. 154/2025", () => {
   });
 
   test("con chofer, transportista y patente arma el Transporte", async () => {
-    const r = await ejecutar(...GUIA, "--fecha", "2026-11-02", "--chofer-rut", "11111111-1", "--chofer-nombre", "Juan Pérez", "--transportista-rut", "76430498-5", "--patente", "ABCD12");
+    const r = await ejecutar(
+      ...GUIA,
+      "--fecha",
+      "2026-11-02",
+      "--chofer-rut",
+      "11111111-1",
+      "--chofer-nombre",
+      "Juan Pérez",
+      "--transportista-rut",
+      "76430498-5",
+      "--patente",
+      "ABCD12",
+    );
     expect(r.codigo).toBe(0);
     expect(r.out.dte.Encabezado.Transporte).toEqual({
       Patente: "ABCD12",

@@ -110,9 +110,7 @@ export class OpenFacturaClient {
     } catch (e) {
       if (vencido) {
         const extra =
-          method === "POST"
-            ? ". La operación pudo haberse procesado igual: repite exactamente el mismo comando, que la idempotencia evita duplicarla"
-            : "";
+          method === "POST" ? ". La operación pudo haberse procesado igual: repite exactamente el mismo comando, que la idempotencia evita duplicarla" : "";
         throw new ApiError(`OpenFactura no respondió en ${this.opts.timeoutMs} ms${extra}`, 0, "TIMEOUT");
       }
       throw new ApiError(`No se pudo conectar con OpenFactura: ${this.ocultar(String(e))}`, 0, "NETWORK");
@@ -137,8 +135,7 @@ export class OpenFacturaClient {
           : typeof data === "string"
             ? data.slice(0, 500)
             : `HTTP ${status}`;
-    const codigo =
-      typeof interno.code === "string" ? interno.code : status === 401 || status === 403 ? "AUTH" : `HTTP_${status}`;
+    const codigo = typeof interno.code === "string" ? interno.code : status === 401 || status === 403 ? "AUTH" : `HTTP_${status}`;
     const reconocido = typeof interno.message === "string" || typeof d.error === "string";
     const detalles = interno.details ?? (reconocido || typeof data === "string" ? undefined : data);
     return new ApiError(this.ocultar(mensaje), status, codigo, this.ocultarEn(detalles));

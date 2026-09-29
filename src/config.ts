@@ -31,9 +31,7 @@ export class ConfigError extends Error {
 export function resolveConfig(flags: FlagsConfig, env: Record<string, string | undefined>): Config {
   const apiKey = (flags.apiKey ?? env.OPENFACTURA_API_KEY ?? env.OPENFACTURA_KEY ?? "").trim();
   if (!apiKey) {
-    throw new ConfigError(
-      "Falta la API key de OpenFactura. Pásala con --api-key o en la variable OPENFACTURA_API_KEY.",
-    );
+    throw new ConfigError("Falta la API key de OpenFactura. Pásala con --api-key o en la variable OPENFACTURA_API_KEY.");
   }
 
   const envVar = env.OPENFACTURA_ENV?.trim().toLowerCase();

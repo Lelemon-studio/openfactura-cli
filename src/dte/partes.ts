@@ -95,8 +95,7 @@ export function receptorDesdeFicha(rut: string, ficha: Obj, manual: DatosRecepto
     let giro = manual.giro ?? limpio(principal(ficha)?.giro);
     if (!giro) {
       throw new ValidationError(
-        `${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. ` +
-          "Si sabes que sí tiene giro, pásalo con --giro",
+        `${razon} (${rut}) no tiene giro en el SII, así que no puede recibir factura: emítele una boleta. ` + "Si sabes que sí tiene giro, pásalo con --giro",
       );
     }
     if (giro.length > MAX_GIRO_RECEPTOR) {

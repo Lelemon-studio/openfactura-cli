@@ -10,7 +10,9 @@ function reloj() {
       esperas.push(ms);
       t += ms;
     },
-    avanzar: (ms: number) => void (t += ms),
+    avanzar: (ms: number) => {
+      t += ms;
+    },
     esperas,
   };
 }

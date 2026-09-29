@@ -18,9 +18,7 @@ export function numeroEstricto(valor: unknown, campo: string, prefijo: string): 
   } else if (typeof valor === "string") {
     const t = valor.trim();
     if (/^[1-9]\d{0,2}([.,]\d{3})+$/.test(t)) {
-      throw new ValidationError(
-        `${prefijo}: ${campo} "${valor}" es ambiguo. Escribe el número sin separador de miles: ${t.replace(/[.,]/g, "")}`,
-      );
+      throw new ValidationError(`${prefijo}: ${campo} "${valor}" es ambiguo. Escribe el número sin separador de miles: ${t.replace(/[.,]/g, "")}`);
     }
     if (!/^\d+([.,]\d+)?$/.test(t)) throw new ValidationError(`${prefijo}: ${campo} "${valor}" no es un número. ${FORMATO}`);
     n = Number(t.replace(",", "."));
@@ -42,9 +40,7 @@ function limpiarNombre(nombre: string, i: number, avisos: string[]): string {
   const limpio = sinGuiones.replace(/\s{2,}/g, " ").trim();
   if (!limpio) throw new ValidationError(`Ítem ${i}: falta el nombre. ${FORMATO}`);
   if (limpio.length > MAX_NOMBRE_ITEM) {
-    throw new ValidationError(
-      `Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${MAX_NOMBRE_ITEM}. Pon el detalle en "descripcion"`,
-    );
+    throw new ValidationError(`Ítem ${i}: el nombre tiene ${limpio.length} caracteres y el máximo es ${MAX_NOMBRE_ITEM}. Pon el detalle en "descripcion"`);
   }
   return limpio;
 }

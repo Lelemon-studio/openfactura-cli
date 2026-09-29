@@ -270,12 +270,16 @@ async function notasPrevias(
       }
       if (!r || pagina >= Number(r.last_page ?? pagina)) break;
       if (pagina === MAX_PAGINAS_NOTAS) {
-        avisos.push(`Hay más de ${MAX_PAGINAS_NOTAS} páginas de notas de crédito desde la fecha del original y sólo se revisaron ${MAX_PAGINAS_NOTAS}: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`);
+        avisos.push(
+          `Hay más de ${MAX_PAGINAS_NOTAS} páginas de notas de crédito desde la fecha del original y sólo se revisaron ${MAX_PAGINAS_NOTAS}: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`,
+        );
       }
     }
     return { suma, folios };
   } catch (e) {
-    avisos.push(`No se pudo revisar si ya hay otras notas de crédito contra este documento (${(e as Error).message}). Revísalo con: openfactura emitidos --tipo 61`);
+    avisos.push(
+      `No se pudo revisar si ya hay otras notas de crédito contra este documento (${(e as Error).message}). Revísalo con: openfactura emitidos --tipo 61`,
+    );
     return null;
   }
 }
@@ -367,7 +371,7 @@ async function enviar(ctx: Contexto, dte: Obj, extra: { respuesta?: string[]; co
     throw new ApiError(
       "OpenFactura respondió algo que no es una emisión y no se sabe si el documento se emitió. Repite exactamente el mismo comando: la idempotencia evita emitirlo dos veces",
       0,
-      "RESPUESTA_INVALIDA",
+      "INVALID_RESPONSE",
       { idempotencyKey: key, fecha: dte.Encabezado?.IdDoc?.FchEmis },
     );
   }
@@ -391,7 +395,7 @@ async function enviar(ctx: Contexto, dte: Obj, extra: { respuesta?: string[]; co
         writeFileSync(pdf, bytes);
         salida.pdf = { archivo: pdf, bytes: bytes.length };
       } else {
-        avisos.push("El documento se emitió, pero el PDF no llegó bien. Pídelo con: openfactura documento pdf --token " + res.TOKEN);
+        avisos.push(`El documento se emitió, pero el PDF no llegó bien. Pídelo con: openfactura documento pdf --token ${res.TOKEN}`);
       }
     }
   } catch (e) {
@@ -403,7 +407,9 @@ async function enviar(ctx: Contexto, dte: Obj, extra: { respuesta?: string[]; co
     try {
       salida.estado = await esperarEstado(ctx, res.TOKEN, entero(espera, "--esperar"));
     } catch (e) {
-      avisos.push(`El documento se emitió, pero no se pudo consultar su estado: ${(e as Error).message}. Reintenta con: openfactura documento estado --token ${res.TOKEN}`);
+      avisos.push(
+        `El documento se emitió, pero no se pudo consultar su estado: ${(e as Error).message}. Reintenta con: openfactura documento estado --token ${res.TOKEN}`,
+      );
     }
   }
   return salida;
@@ -447,7 +453,9 @@ async function emitirTipo(ctx: Contexto, nombre: string) {
   const ref = tipo.nota ? await referenciaNota(ctx, tipo, rutPropio) : undefined;
   const modo: Modo = ref ? (TIPOS_EXENTOS.has(ref.tipo) ? "exento" : TIPOS_BOLETA.has(ref.tipo) ? "bruto" : "neto") : tipo.modo;
   if (ctx.flags["con-iva"] && modo !== "neto") {
-    throw new UsageError("--con-iva es para factura y notas sobre factura. En boleta y en notas sobre boleta el precio ya va con IVA; en documentos exentos no hay IVA");
+    throw new UsageError(
+      "--con-iva es para factura y notas sobre factura. En boleta y en notas sobre boleta el precio ya va con IVA; en documentos exentos no hay IVA",
+    );
   }
   const origTotales = ref ? totalesOriginales(ref.original.Encabezado.Totales, modo) : undefined;
 
@@ -493,9 +501,7 @@ async function emitirTipo(ctx: Contexto, nombre: string) {
     totales = totalesDte({ MntNeto: 0, MntExe: 0, IVA: 0, MntTotal: 0 }, tipo, modo);
   } else {
     if (!ref && entrada.length && entrada.every((l) => l.exento) && (tipo.codigo === 33 || tipo.codigo === 39)) {
-      throw new ValidationError(
-        `Todas las líneas son exentas: corresponde ${tipo.codigo === 33 ? "factura-exenta (34)" : "boleta-exenta (41)"}, no ${nombre}`,
-      );
+      throw new ValidationError(`Todas las líneas son exentas: corresponde ${tipo.codigo === 33 ? "factura-exenta (34)" : "boleta-exenta (41)"}, no ${nombre}`);
     }
     const calculo = calcularTotales(modo, entrada, { preciosConIva: Boolean(ctx.flags["con-iva"]), permitirCero: tipo.guia });
     avisos.push(...calculo.avisos);
@@ -562,7 +568,10 @@ async function emitirTipo(ctx: Contexto, nombre: string) {
     if (despacho !== undefined) idDoc.TipoDespacho = despacho;
     const transporte: Obj = {};
     const limpio = (n: string) => texto(ctx.flags, n)?.trim() || undefined;
-    const placa = (n: string) => limpio(n)?.toUpperCase().replace(/[\s.-]/g, "") || undefined;
+    const placa = (n: string) =>
+      limpio(n)
+        ?.toUpperCase()
+        .replace(/[\s.-]/g, "") || undefined;
     const patente = placa("patente");
     const carro = placa("patente-carro");
     const trans = limpio("transportista-rut");
@@ -640,7 +649,12 @@ async function emitirArchivo(ctx: Contexto) {
   }
   const email = correo(ctx);
   const correoArchivo = esBody ? contenido.sendEmail?.to : undefined;
-  if (correoArchivo !== undefined && !String(correoArchivo).split(",").every((c) => CORREO.test(c.trim()))) {
+  if (
+    correoArchivo !== undefined &&
+    !String(correoArchivo)
+      .split(",")
+      .every((c) => CORREO.test(c.trim()))
+  ) {
     throw new ValidationError(`sendEmail.to del archivo no es un correo válido: "${correoArchivo}"`);
   }
   const respuesta = esBody && Array.isArray(contenido.response) ? contenido.response : undefined;

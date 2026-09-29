@@ -43,8 +43,7 @@ describe("cli", () => {
   });
 
   test("un error de la API sale 1 con el código de OpenFactura", async () => {
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ error: { message: "mal", code: "OF-22" } }), { status: 400 })) as unknown as typeof fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: "mal", code: "OF-22" } }), { status: 400 })) as unknown as typeof fetch;
     const c = capturar();
     expect(await run(["emisor"], ENV, c.io)).toBe(1);
     expect(JSON.parse(c.err.join(""))).toMatchObject({ code: "OF-22", status: 400 });
@@ -90,4 +89,11 @@ describe("errores de uso antes de pedir la clave", () => {
     expect(await run(["emisor", "sobra"], {}, c.io)).toBe(2);
     expect(JSON.parse(c.err.join(""))).toMatchObject({ code: "USAGE" });
   });
+});
+
+test("--version es la versión de package.json", async () => {
+  const pkg = JSON.parse(await Bun.file(new URL("../package.json", import.meta.url)).text());
+  const c = capturar();
+  expect(await run(["--version"], ENV, c.io)).toBe(0);
+  expect(c.out.join("").trim()).toBe(pkg.version);
 });
