@@ -3,6 +3,47 @@
 // src/cli.ts
 import { parseArgs } from "node:util";
 
+// src/limitador.ts
+class Limitador {
+  marcas = [];
+  cola = Promise.resolve();
+  ahora;
+  esperar;
+  porSegundo;
+  porMinuto;
+  constructor(opciones = {}) {
+    this.ahora = opciones.ahora ?? Date.now;
+    this.esperar = opciones.esperar ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.porSegundo = opciones.porSegundo ?? 3;
+    this.porMinuto = opciones.porMinuto ?? 100;
+  }
+  turno() {
+    const siguiente = this.cola.then(() => this.esperarCupo());
+    this.cola = siguiente.catch(() => {
+      return;
+    });
+    return siguiente;
+  }
+  async esperarCupo() {
+    for (;; ) {
+      const t = this.ahora();
+      while (this.marcas.length && this.marcas[0] <= t - 60000)
+        this.marcas.shift();
+      const ultimoSegundo = this.marcas.filter((m) => m > t - 1000);
+      let espera = 0;
+      if (ultimoSegundo.length >= this.porSegundo)
+        espera = ultimoSegundo[ultimoSegundo.length - this.porSegundo] + 1000 - t;
+      if (this.marcas.length >= this.porMinuto)
+        espera = Math.max(espera, this.marcas[this.marcas.length - this.porMinuto] + 60000 - t);
+      if (espera <= 0) {
+        this.marcas.push(t);
+        return;
+      }
+      await this.esperar(espera);
+    }
+  }
+}
+
 // src/client.ts
 class ApiError extends Error {
   status;
@@ -40,8 +81,10 @@ function parsear(texto) {
 
 class OpenFacturaClient {
   opts;
+  limitador;
   constructor(opts) {
     this.opts = opts;
+    this.limitador = opts.limite ? new Limitador({ ...opts.limite, esperar: opts.esperar, ahora: opts.ahora }) : null;
   }
   get(path) {
     return this.request("GET", path);
@@ -74,6 +117,7 @@ class OpenFacturaClient {
       headers["Content-Type"] = "application/json";
     if (options.idempotencyKey)
       headers["Idempotency-Key"] = options.idempotencyKey;
+    await this.limitador?.turno();
     const control = new AbortController;
     let vencido = false;
     const reloj = setTimeout(() => {
@@ -143,7 +187,21 @@ function resolveConfig(flags, env) {
     throw new ConfigError(`OPENFACTURA_ENV="${envVar}" no existe. Usa "prod" o "dev".`);
   }
   const ambiente = flags.dev || envVar === "dev" ? "dev" : "prod";
-  return { apiKey, env: ambiente, baseUrl: BASE_URLS[ambiente], timeoutMs: flags.timeoutMs ?? 60000 };
+  return { apiKey, env: ambiente, baseUrl: BASE_URLS[ambiente], timeoutMs: flags.timeoutMs ?? 60000, limite: limite(env.OPENFACTURA_LIMITE) };
+}
+function limite(valor) {
+  const v = valor?.trim();
+  if (!v)
+    return { porSegundo: 3, porMinuto: 100 };
+  if (v === "0")
+    return null;
+  const m = /^(\d+)\/(\d+)$/.exec(v);
+  const porSegundo = Number(m?.[1]);
+  const porMinuto = Number(m?.[2]);
+  if (!m || porSegundo < 1 || porMinuto < 1) {
+    throw new ConfigError(`OPENFACTURA_LIMITE="${v}" no se entiende. Usa llamadas por segundo y por minuto, como "3/100", o "0" para desactivarlo.`);
+  }
+  return { porSegundo, porMinuto };
 }
 
 // src/command.ts
@@ -242,9 +300,7 @@ function rutCuerpo(entrada) {
 }
 
 // src/commands/lecturas.ts
-var PAUSA_ENTRE_PAGINAS_MS = 350;
 var MAX_PAGINAS = 500;
-var esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 function entero(valor, nombre) {
   if (valor === undefined || !/^\d+$/.test(valor.trim()))
     throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
@@ -293,11 +349,21 @@ async function listar(ctx, ruta, filtros) {
   if (folio !== undefined && texto(ctx.flags, "pagina"))
     throw new UsageError("--folio recorre todas las páginas: no se combina con --pagina");
   const documentos = [];
+  const avisos = [];
+  const primera = pagina;
   let ultima = 0;
   let total = 0;
   for (;; ) {
     const body = pagina > 1 ? { ...filtros, Page: pagina } : filtros;
-    const r = await ctx.client.post(ruta, body);
+    let r;
+    try {
+      r = await ctx.client.post(ruta, body);
+    } catch (e) {
+      if (pagina === primera)
+        throw e;
+      avisos.push(`El listado quedó incompleto: falló la página ${pagina} de ${ultima} (${e.message}). Lo de arriba es lo que alcanzó a bajar.`);
+      break;
+    }
     if (!r)
       break;
     documentos.push(...r.data ?? []);
@@ -305,17 +371,23 @@ async function listar(ctx, ruta, filtros) {
     ultima = Number.isInteger(ultimaInformada) && ultimaInformada >= 0 ? ultimaInformada : pagina;
     const totalInformado = Number(r.total ?? documentos.length);
     total = Number.isFinite(totalInformado) ? totalInformado : documentos.length;
-    if (!todas || pagina >= ultima || pagina >= MAX_PAGINAS)
+    if (!todas || pagina >= ultima)
       break;
+    if (pagina >= MAX_PAGINAS) {
+      avisos.push(`El listado quedó incompleto: se cortó en ${MAX_PAGINAS} páginas de ${ultima}. Acota con --desde y --hasta.`);
+      break;
+    }
     pagina++;
-    await esperar(PAUSA_ENTRE_PAGINAS_MS);
   }
+  const extra = avisos.length ? { incompleto: true, avisos } : {};
   if (folio !== undefined) {
     const buscado = entero(folio, "--folio");
     const filtrados = documentos.filter((d) => Number(d.Folio) === buscado);
-    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados };
+    if (avisos.length && !filtrados.length)
+      avisos.push(`El folio ${buscado} no apareció, pero no se revisaron todas las páginas: puede existir igual.`);
+    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados, ...extra };
   }
-  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos };
+  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos, ...extra };
 }
 var FLAGS_LISTA = {
   desde: { type: "string" },
@@ -921,11 +993,11 @@ function revisarLargos(valor, ruta, errores) {
   if (!valor || typeof valor !== "object")
     return;
   for (const [k, v] of Object.entries(valor)) {
-    const limite = LARGOS[k];
-    if (limite !== undefined && typeof v === "string" && v.length > limite) {
-      errores.push(`${ruta}.${k} tiene ${v.length} caracteres y el SII admite ${limite}`);
-    } else if (limite !== undefined && typeof v === "number" && String(v).length > limite) {
-      errores.push(`${ruta}.${k} tiene ${String(v).length} dígitos y el SII admite ${limite}`);
+    const limite2 = LARGOS[k];
+    if (limite2 !== undefined && typeof v === "string" && v.length > limite2) {
+      errores.push(`${ruta}.${k} tiene ${v.length} caracteres y el SII admite ${limite2}`);
+    } else if (limite2 !== undefined && typeof v === "number" && String(v).length > limite2) {
+      errores.push(`${ruta}.${k} tiene ${String(v).length} dígitos y el SII admite ${limite2}`);
     }
     revisarLargos(v, `${ruta}.${k}`, errores);
   }
@@ -965,11 +1037,11 @@ var NOMBRES = {
   CmnaRecep: "la comuna del receptor"
 };
 function delSii(campo, valor, avisos) {
-  const limite = LARGOS[campo];
-  if (limite === undefined || valor.length <= limite)
+  const limite2 = LARGOS[campo];
+  if (limite2 === undefined || valor.length <= limite2)
     return valor;
-  avisos.push(`El SII trae ${NOMBRES[campo] ?? campo} con ${valor.length} caracteres; se recortó a ${limite}, que es lo que admite el formato del SII`);
-  return valor.slice(0, limite).trim();
+  avisos.push(`El SII trae ${NOMBRES[campo] ?? campo} con ${valor.length} caracteres; se recortó a ${limite2}, que es lo que admite el formato del SII`);
+  return valor.slice(0, limite2).trim();
 }
 function actividades(ficha) {
   return Array.isArray(ficha.actividades) ? ficha.actividades : [];
@@ -1310,6 +1382,9 @@ async function notasPrevias(ctx, ref, rutPropio, receptor, avisos) {
       }
       if (!r || pagina >= Number(r.last_page ?? pagina))
         break;
+      if (pagina === MAX_PAGINAS_NOTAS) {
+        avisos.push(`Hay más de ${MAX_PAGINAS_NOTAS} páginas de notas de crédito desde la fecha del original y sólo se revisaron ${MAX_PAGINAS_NOTAS}: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`);
+      }
     }
     return { suma: suma2, folios };
   } catch (e) {
@@ -1437,12 +1512,12 @@ async function enviar(ctx, dte, extra, resumen, avisos) {
 }
 async function esperarEstado(ctx, token, segundos) {
   const intervalo = texto(ctx.flags, "intervalo") !== undefined ? entero(texto(ctx.flags, "intervalo"), "--intervalo") : 10;
-  const limite = Date.now() + segundos * 1000;
+  const limite2 = Date.now() + segundos * 1000;
   let estado = "Sin estado";
   for (;; ) {
     const r = await ctx.client.get(`/document/${token}/status`);
     estado = String(r?.estado ?? estado);
-    if (!["Sin estado", "Pendiente"].includes(estado) || Date.now() >= limite)
+    if (!["Sin estado", "Pendiente"].includes(estado) || Date.now() >= limite2)
       return estado;
     await new Promise((res) => setTimeout(res, intervalo * 1000));
   }

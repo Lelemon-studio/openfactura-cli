@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 const BASE = "https://api.haulmer.com/v2/dte";
-const ENV = { OPENFACTURA_API_KEY: "k" };
+const ENV = { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "0" };
 
 async function ejecutar(...argv: string[]) {
   const out: string[] = [];
@@ -262,5 +262,34 @@ describe("operaciones que escriben en el SII piden --confirmar", () => {
   test("anular-guia con --confirmar llama", async () => {
     await ejecutar("anular-guia", "34972", "--fecha", "2026-09-20", "--confirmar");
     expect(llamadas[0]!.url).toBe(`${BASE}/anularDTE52`);
+  });
+});
+
+describe("paginación que no pierde lo que ya bajó", () => {
+  test("si una página falla a mitad de camino devuelve lo acumulado con aviso", async () => {
+    cola(
+      { status: 200, body: { current_page: 1, last_page: 3, total: 3, data: [{ Folio: 1 }] } },
+      { status: 500, body: { error: { message: "caído" } } },
+    );
+    const r = await ejecutar("emitidos", "--todas");
+    expect(r.codigo).toBe(0);
+    expect(r.out.documentos).toEqual([{ Folio: 1 }]);
+    expect(r.out.incompleto).toBe(true);
+    expect(r.out.avisos.join(" ")).toContain("página 2");
+  });
+
+  test("si falla la primera página es error", async () => {
+    cola({ status: 500, body: { error: { message: "caído" } } });
+    expect((await ejecutar("emitidos", "--todas")).codigo).toBe(1);
+  });
+
+  test("--folio que no aparece en un listado incompleto no dice que no existe", async () => {
+    cola(
+      { status: 200, body: { current_page: 1, last_page: 2, total: 2, data: [{ Folio: 1 }] } },
+      { status: 500, body: { error: { message: "caído" } } },
+    );
+    const r = await ejecutar("emitidos", "--folio", "9");
+    expect(r.out.incompleto).toBe(true);
+    expect(r.out.avisos.join(" ")).toContain("no se revisaron todas");
   });
 });

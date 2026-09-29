@@ -97,6 +97,14 @@ Deja la skill en `~/.claude/skills/openfactura/`. Desde ahí basta con pedirle a
 "emítele una factura a 76.430.498-5 por 100 mil neto" o "¿el SII aceptó la factura 31?". La skill le
 indica mostrarte el resumen en seco y esperar tu aprobación antes de emitir.
 
+## Límite de llamadas
+
+OpenFactura acepta 3 llamadas por segundo y 100 por minuto. El CLI espera su turno solo para no pasarse,
+así que un listado largo o una nota de crédito que revisa notas previas puede tardar. Si tu cuenta tiene
+otro límite, ajústalo con `OPENFACTURA_LIMITE=5/200`, o desactívalo con `OPENFACTURA_LIMITE=0`.
+
+Si un listado falla a mitad de camino, devuelve lo que alcanzó a bajar con `"incompleto": true` y un aviso.
+
 ## Ambiente de pruebas
 
 `--dev` (u `OPENFACTURA_ENV=dev`) apunta a `dev-api.haulmer.com`. La documentación de OpenFactura

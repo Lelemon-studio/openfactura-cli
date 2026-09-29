@@ -12,7 +12,7 @@ function capturar() {
   return { io: { out: (s: string) => out.push(s), err: (s: string) => err.push(s) }, out, err };
 }
 
-const ENV = { OPENFACTURA_API_KEY: "k" };
+const ENV = { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "0" };
 
 describe("cli", () => {
   test("--help lista los comandos y sale 0", async () => {

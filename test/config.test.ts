@@ -43,3 +43,21 @@ describe("resolveConfig", () => {
     expect(() => resolveConfig({}, { OPENFACTURA_API_KEY: "k", OPENFACTURA_ENV: "staging" })).toThrow(ConfigError);
   });
 });
+
+describe("OPENFACTURA_LIMITE", () => {
+  test("por defecto limita a 3 por segundo y 100 por minuto", () => {
+    expect(resolveConfig({}, { OPENFACTURA_API_KEY: "k" }).limite).toEqual({ porSegundo: 3, porMinuto: 100 });
+  });
+
+  test("se puede ajustar", () => {
+    expect(resolveConfig({}, { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "5/200" }).limite).toEqual({ porSegundo: 5, porMinuto: 200 });
+  });
+
+  test("0 lo desactiva", () => {
+    expect(resolveConfig({}, { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "0" }).limite).toBeNull();
+  });
+
+  test("un valor mal escrito falla", () => {
+    expect(() => resolveConfig({}, { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "rapido" })).toThrow(ConfigError);
+  });
+});

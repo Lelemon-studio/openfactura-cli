@@ -4,9 +4,7 @@ import { type Comando, type Contexto, type Flags, UsageError, arg, requerido, te
 import { fecha, periodo, rutaPeriodo } from "../fechas.ts";
 import { normalizarRut, rutCuerpo } from "../rut.ts";
 
-const PAUSA_ENTRE_PAGINAS_MS = 350;
 const MAX_PAGINAS = 500;
-const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function entero(valor: string | undefined, nombre: string): number {
   if (valor === undefined || !/^\d+$/.test(valor.trim())) throw new UsageError(`${nombre} debe ser un número entero, llegó "${valor}"`);
@@ -59,29 +57,43 @@ async function listar(ctx: Contexto, ruta: string, filtros: Record<string, unkno
   if (pagina < 1) throw new UsageError("--pagina parte en 1");
   if (folio !== undefined && texto(ctx.flags, "pagina")) throw new UsageError("--folio recorre todas las páginas: no se combina con --pagina");
   const documentos: Array<Record<string, unknown>> = [];
+  const avisos: string[] = [];
+  const primera = pagina;
   let ultima = 0;
   let total = 0;
 
   for (;;) {
     const body = pagina > 1 ? { ...filtros, Page: pagina } : filtros;
-    const r = (await ctx.client.post(ruta, body)) as Pagina | null;
+    let r: Pagina | null;
+    try {
+      r = (await ctx.client.post(ruta, body)) as Pagina | null;
+    } catch (e) {
+      if (pagina === primera) throw e;
+      avisos.push(`El listado quedó incompleto: falló la página ${pagina} de ${ultima} (${(e as Error).message}). Lo de arriba es lo que alcanzó a bajar.`);
+      break;
+    }
     if (!r) break;
     documentos.push(...(r.data ?? []));
     const ultimaInformada = Number(r.last_page ?? pagina);
     ultima = Number.isInteger(ultimaInformada) && ultimaInformada >= 0 ? ultimaInformada : pagina;
     const totalInformado = Number(r.total ?? documentos.length);
     total = Number.isFinite(totalInformado) ? totalInformado : documentos.length;
-    if (!todas || pagina >= ultima || pagina >= MAX_PAGINAS) break;
+    if (!todas || pagina >= ultima) break;
+    if (pagina >= MAX_PAGINAS) {
+      avisos.push(`El listado quedó incompleto: se cortó en ${MAX_PAGINAS} páginas de ${ultima}. Acota con --desde y --hasta.`);
+      break;
+    }
     pagina++;
-    await esperar(PAUSA_ENTRE_PAGINAS_MS);
   }
 
+  const extra = avisos.length ? { incompleto: true, avisos } : {};
   if (folio !== undefined) {
     const buscado = entero(folio, "--folio");
     const filtrados = documentos.filter((d) => Number(d.Folio) === buscado);
-    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados };
+    if (avisos.length && !filtrados.length) avisos.push(`El folio ${buscado} no apareció, pero no se revisaron todas las páginas: puede existir igual.`);
+    return { total: filtrados.length, paginas: ultima, pagina: 1, documentos: filtrados, ...extra };
   }
-  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos };
+  return { total, paginas: ultima, pagina: todas ? 1 : pagina, documentos, ...extra };
 }
 
 const FLAGS_LISTA = {

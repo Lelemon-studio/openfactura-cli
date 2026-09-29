@@ -61,7 +61,7 @@ afterEach(() => {
 async function ejecutar(...argv: string[]) {
   const out: string[] = [];
   const err: string[] = [];
-  const codigo = await run(argv, { OPENFACTURA_API_KEY: "k" }, { out: (s) => out.push(s), err: (s) => err.push(s) });
+  const codigo = await run(argv, { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "0" }, { out: (s) => out.push(s), err: (s) => err.push(s) });
   return { codigo, out: out.length ? JSON.parse(out.join("")) : undefined, err: err.length ? JSON.parse(err.join("")) : undefined };
 }
 

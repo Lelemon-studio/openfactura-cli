@@ -1,8 +1,12 @@
+import { Limitador } from "./limitador.ts";
+
 export interface ClientOptions {
   apiKey: string;
   baseUrl: string;
   timeoutMs: number;
+  limite?: { porSegundo: number; porMinuto: number } | null;
   esperar?: (ms: number) => Promise<void>;
+  ahora?: () => number;
 }
 
 export interface RequestOptions {
@@ -47,7 +51,11 @@ function parsear(texto: string): unknown {
 }
 
 export class OpenFacturaClient {
-  constructor(private readonly opts: ClientOptions) {}
+  private readonly limitador: Limitador | null;
+
+  constructor(private readonly opts: ClientOptions) {
+    this.limitador = opts.limite ? new Limitador({ ...opts.limite, esperar: opts.esperar, ahora: opts.ahora }) : null;
+  }
 
   get(path: string): Promise<unknown> {
     return this.request("GET", path);
@@ -81,6 +89,7 @@ export class OpenFacturaClient {
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
 
+    await this.limitador?.turno();
     const control = new AbortController();
     let vencido = false;
     const reloj = setTimeout(() => {

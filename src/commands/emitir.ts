@@ -260,6 +260,9 @@ async function notasPrevias(
         for (const k of ["MntNeto", "MntExe", "IVA", "MntTotal"]) suma[k] = (suma[k] ?? 0) + (t[k] ?? 0);
       }
       if (!r || pagina >= Number(r.last_page ?? pagina)) break;
+      if (pagina === MAX_PAGINAS_NOTAS) {
+        avisos.push(`Hay más de ${MAX_PAGINAS_NOTAS} páginas de notas de crédito desde la fecha del original y sólo se revisaron ${MAX_PAGINAS_NOTAS}: la suma de notas previas puede estar incompleta. Revísalo con: openfactura emitidos --tipo 61`);
+      }
     }
     return { suma, folios };
   } catch (e) {

@@ -123,6 +123,25 @@ describe("OpenFacturaClient", () => {
     expect(await cliente().post("/document", {})).toEqual({ FOLIO: 5, WARNING: "GiroRecep truncado" });
   });
 
+  test("con límite, la cuarta llamada del mismo segundo espera su turno", async () => {
+    let t = 0;
+    const esperas: number[] = [];
+    globalThis.fetch = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+    const c = new OpenFacturaClient({
+      apiKey: "k",
+      baseUrl: "https://api.test",
+      timeoutMs: 1000,
+      limite: { porSegundo: 3, porMinuto: 100 },
+      ahora: () => t,
+      esperar: async (ms) => {
+        esperas.push(ms);
+        t += ms;
+      },
+    });
+    for (let i = 0; i < 4; i++) await c.get("/organization");
+    expect(esperas).toEqual([1000]);
+  });
+
   test("ante un 429 espera lo que pide la API y reintenta", async () => {
     const respuestas = [
       new Response(JSON.stringify({ statusCode: 429, message: "Rate limit is exceeded. Try again in 1 seconds." }), { status: 429 }),

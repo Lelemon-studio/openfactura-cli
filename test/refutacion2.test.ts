@@ -51,7 +51,7 @@ afterEach(() => {
 async function ejecutar(...argv: string[]) {
   const out: string[] = [];
   const err: string[] = [];
-  const codigo = await run(argv, { OPENFACTURA_API_KEY: "k" }, { out: (s) => out.push(s), err: (s) => err.push(s) });
+  const codigo = await run(argv, { OPENFACTURA_API_KEY: "k", OPENFACTURA_LIMITE: "0" }, { out: (s) => out.push(s), err: (s) => err.push(s) });
   return { codigo, out: out.length ? JSON.parse(out.join("")) : undefined, err: err.length ? JSON.parse(err.join("")) : undefined, errCrudo: err.join("") };
 }
 
@@ -117,6 +117,13 @@ describe("notas de crédito acumuladas", () => {
     rutas["POST /document/issued"] = [{ status: 200, body: { current_page: 1, last_page: 1, total: 1, data: [{ TipoDTE: 61, Folio: 7 }] } }];
     responde("GET /document/76795561-8/61/7/json", { status: 200, body: { json: { Encabezado: { Totales: { MntNeto: 0, IVA: 0, MntTotal: 0 } }, Referencia: [{ TpoDocRef: "33", FolioRef: 30, CodRef: 2 }] } } });
     expect((await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--anula", ...HOY)).codigo).toBe(0);
+  });
+
+  test("si hay más notas que las que revisa, avisa que la suma puede estar incompleta", async () => {
+    rutas["POST /document/issued"] = [{ status: 200, body: { current_page: 1, last_page: 50, total: 50, data: [] } }];
+    const r = await ejecutar("emitir", "nota-credito", "--referencia", "33:30", "--corrige-montos", "--item", "x|1|1000", ...HOY);
+    expect(r.codigo).toBe(0);
+    expect(r.out.avisos.join(" ")).toContain("sólo se revisaron");
   });
 
   test("si no puede revisar las notas previas, avisa", async () => {
