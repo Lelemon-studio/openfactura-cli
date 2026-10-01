@@ -4,6 +4,12 @@ Los cambios que afectan a quien usa el CLI. El formato sigue [Keep a Changelog](
 y las versiones, [SemVer](https://semver.org/lang/es/). Antes de la 1.0, una versión menor puede traer cambios
 incompatibles, y se marcan como tales.
 
+## [Sin publicar]
+
+### Arreglado
+
+- Un giro del receptor recortado a 40 caracteres ya no queda con un espacio al final.
+
 ## [0.2.0] - 2026-09-29
 
 ### Cambiado (incompatible)
