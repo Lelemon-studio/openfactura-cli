@@ -1236,7 +1236,7 @@ function receptorDesdeFicha(rut, ficha, manual, esBoleta, avisos) {
     }
     if (giro.length > MAX_GIRO_RECEPTOR) {
       avisos.push(`El giro del receptor se recortó a ${MAX_GIRO_RECEPTOR} caracteres, que es lo que admite el SII`);
-      giro = giro.slice(0, MAX_GIRO_RECEPTOR);
+      giro = giro.slice(0, MAX_GIRO_RECEPTOR).trimEnd();
     }
     receptor.GiroRecep = giro;
     if (manual.contacto)

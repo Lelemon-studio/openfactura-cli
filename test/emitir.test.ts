@@ -484,3 +484,18 @@ describe("tipos", () => {
     expect(r.err.error).toContain("factura");
   });
 });
+
+test("un giro recortado a 40 caracteres no queda con un espacio al final", async () => {
+  responde("GET /taxpayer/10000013-K", {
+    status: 200,
+    body: {
+      rut: "10000013-K",
+      razonSocial: "EMPRESA DE PRUEBA SPA",
+      direccion: "CALLE 1",
+      comuna: "Lampa",
+      actividades: [{ giro: "OTRAS ACTIVIDADES DE SERVICIOS DE APOYO A LAS EMPRESAS", codigoActividadEconomica: "829900", actividadPrincipal: true }],
+    },
+  });
+  const r = await ejecutar("emitir", "factura", "--receptor", "10000013-K", "--item", "x|1|1000", ...FECHA);
+  expect(r.out.dte.Encabezado.Receptor.GiroRecep).toBe("OTRAS ACTIVIDADES DE SERVICIOS DE APOYO");
+});
